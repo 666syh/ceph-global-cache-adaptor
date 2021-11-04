@@ -1,1 +1,2688 @@
-diff -Naur
+From 40ee451fb8bf18cd6292e717e4cb6449b0f45ca0 Mon Sep 17 00:00:00 2001
+From: wangzengliang <root@taishan200-2280-2s48p-256g--a60.compass-ci.net>
+Date: Wed, 3 Nov 2021 19:37:04 +0800
+Subject: [PATCH] add src patch
+
+---
+ src/CMakeLists.txt                            |  16 +
+ src/client_adaptor/CMakeLists.txt             |  17 +
+ src/client_adaptor/ClientAdaptorMgr.cc        |  64 +++
+ src/client_adaptor/ClientAdaptorMgr.h         |  91 ++++
+ src/client_adaptor/ClientAdaptorMsg.cc        | 281 +++++++++++++
+ src/client_adaptor/ClientAdaptorMsg.h         |  72 ++++
+ src/client_adaptor/ClientAdaptorPerf.cc       |  83 ++++
+ src/client_adaptor/ClientAdaptorPerf.h        |  50 +++
+ src/client_adaptor/ClientAdaptorPlugin.cc     |  39 ++
+ src/client_adaptor/ClientAdaptorPlugin.h      |  33 ++
+ src/common/options.cc                         |  27 +-
+ src/include/config-h.in.cmake                 |   3 +
+ src/librbd/ImageCtx.cc                        |  12 +
+ src/librbd/Types.h                            |   8 +
+ src/librbd/io/ImageDispatchSpec.h             |   6 +-
+ src/librbd/io/ImageRequestWQ.cc               |  26 +-
+ src/msg/Message.cc                            |   6 +-
+ src/osdc/Objecter.cc                          | 389 +++++++++++++++++-
+ src/osdc/Objecter.h                           |   8 +-
+ src/test/CMakeLists.txt                       |   7 +
+ src/test/ClientAdaptorTest/CMakeLists.txt     |  11 +
+ .../ClientAdaptorTest/ClientAdaptorTest.cc    | 370 +++++++++++++++++
+ src/test/ServerAdaptorSimulate/CMakeLists.txt |   9 +
+ .../global_cache_dispatcher.cc                | 150 +++++++
+ .../global_cache_dispatcher.h                 | 108 +++++
+ .../global_cache_server.cc                    | 131 ++++++
+ .../librbd/io/test_mock_ImageRequestWQ.cc     |   5 +
+ src/test/messenger/simple_client.cc           |  35 +-
+ src/test/messenger/simple_dispatcher.cc       |  25 +-
+ src/test/messenger/simple_server.cc           |  18 +-
+ src/vstart.sh                                 |   2 +
+ 31 files changed, 2083 insertions(+), 19 deletions(-)
+ create mode 100644 src/client_adaptor/CMakeLists.txt
+ create mode 100644 src/client_adaptor/ClientAdaptorMgr.cc
+ create mode 100644 src/client_adaptor/ClientAdaptorMgr.h
+ create mode 100644 src/client_adaptor/ClientAdaptorMsg.cc
+ create mode 100644 src/client_adaptor/ClientAdaptorMsg.h
+ create mode 100644 src/client_adaptor/ClientAdaptorPerf.cc
+ create mode 100644 src/client_adaptor/ClientAdaptorPerf.h
+ create mode 100644 src/client_adaptor/ClientAdaptorPlugin.cc
+ create mode 100644 src/client_adaptor/ClientAdaptorPlugin.h
+ create mode 100644 src/test/ClientAdaptorTest/CMakeLists.txt
+ create mode 100644 src/test/ClientAdaptorTest/ClientAdaptorTest.cc
+ create mode 100644 src/test/ServerAdaptorSimulate/CMakeLists.txt
+ create mode 100644 src/test/ServerAdaptorSimulate/global_cache_dispatcher.cc
+ create mode 100644 src/test/ServerAdaptorSimulate/global_cache_dispatcher.h
+ create mode 100644 src/test/ServerAdaptorSimulate/global_cache_server.cc
+
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 28ec9835..1b0fa1d3 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -103,6 +103,12 @@ if(HAVE_INTEL)
+     HAVE_BETTER_YASM_ELF64)
+ endif()
+ 
++if(WITH_GLOBAL_CACHE)
++set(third_part_dir ${CMAKE_SOURCE_DIR}/../third_part)
++message(STATUS "third part directory --> " ${third_part_dir})
++include_directories(${third_part_dir}/inc)
++link_directories(${third_part_dir}/lib)
++#add_compile_definitions("CEPH_LIBDIR=${third_part_dir}")
++endif()
+ 
+ # require c++17
+ if(CMAKE_VERSION VERSION_LESS "3.8")
+@@ -393,6 +399,10 @@ if(WITH_DPDK)
+   list(APPEND ceph_common_deps common_async_dpdk)
+ endif()
+ 
++if(WITH_GLOBAL_CACHE)
++  list(APPEND ceph_common_deps ceph_client_adaptor_plugin)
++endif()
++
+ add_library(common STATIC ${ceph_common_objs})
+ target_link_libraries(common ${ceph_common_deps})
+ 
+@@ -560,6 +570,12 @@ add_subdirectory(dmclock)
+ 
+ add_subdirectory(compressor)
+ 
++#Client adaptor
++if(WITH_GLOBAL_CACHE)
++message(STATUS "Client adaptor cmake executing...")
++add_subdirectory(client_adaptor)
++endif()
++
+ add_subdirectory(tools)
+ 
+ if(WITH_TESTS)
+diff --git a/src/client_adaptor/CMakeLists.txt b/src/client_adaptor/CMakeLists.txt
+new file mode 100644
+index 00000000..17c30787
+--- /dev/null
++++ b/src/client_adaptor/CMakeLists.txt
+@@ -0,0 +1,17 @@
++set(client_adaptor_srcs
++  ClientAdaptorMsg.cc
++  ClientAdaptorMgr.cc
++  ClientAdaptorPerf.cc
++  ClientAdaptorPlugin.cc
++)
++
++add_library(ceph_client_adaptor_plugin SHARED ${client_adaptor_srcs})
++message(STATUS "In cliend adaptor third part directory --> " ${third_part_dir})
++target_link_libraries(ceph_client_adaptor_plugin ccm_lib das)
++
++
++set(client_adaptor_dir ${CEPH_INSTALL_PKGLIBDIR})
++install(TARGETS ceph_client_adaptor_plugin   DESTINATION ${client_adaptor_dir})
++
++message(STATUS "Global Cache client-adaptor cmake executing...")
++
+diff --git a/src/client_adaptor/ClientAdaptorMgr.cc b/src/client_adaptor/ClientAdaptorMgr.cc
+new file mode 100644
+index 00000000..e0b5b3dd
+--- /dev/null
++++ b/src/client_adaptor/ClientAdaptorMgr.cc
+@@ -0,0 +1,64 @@
++#include "ClientAdaptorMgr.h"
++
++using namespace std;
++
++void ClientAdaptorMgr::set_init_flag(bool flag){
++    init_flag = flag;
++    return;
++}
++
++const bool ClientAdaptorMgr::is_init_succeed(){
++    if(init_flag){
++        return true;
++    } else {
++        return false;
++    }
++}
++/*
++ * Init manager .  failed to return -1
++*/
++int32_t ClientAdaptorCcm::init_mgr(){
++    //Already init
++    if (is_init_succeed()){
++        return 0;
++    }
++    if (ConfParserInit()){
++        cout << __func__ << " Client Adaptor: Config Parser init failed" << endl;
++	return -1;
++    }
++
++    if (AgentInit()){
++        cout<< __func__<<" Client Adaptor: CCM agent init failed" << endl;
++	return -1;
++    }
++
++    return 0;
++}
++
++int32_t ClientAdaptorCcm::get_pt_num(uint32_t& num){
++
++    num = GetTotalPtNum();
++
++    return 0;
++}
++
++int32_t ClientAdaptorCcm::get_pt_entry(uint32_t pt_index, PTViewptEntry* entry){
++
++
++    if (GetPtEntry(pt_index,entry)){
++        cout << __func__ << " Client Adaptor: Get PT entry failed" << endl;
++	return -1;
++    }
++    return 0;
++}
++
++int32_t ClientAdaptorCcm::get_node_info(uint32_t node_id, NodeInfo* node_info){
++
++
++    if (AgentGetNodeInfo(node_id, node_info)){
++        cout << __func__ << " Client Adaptor: Get node infomation failed" << endl;
++        return -1;
++    }
++
++    return 0;
++}
+diff --git a/src/client_adaptor/ClientAdaptorMgr.h b/src/client_adaptor/ClientAdaptorMgr.h
+new file mode 100644
+index 00000000..2f3fcf2d
+--- /dev/null
++++ b/src/client_adaptor/ClientAdaptorMgr.h
+@@ -0,0 +1,91 @@
++#ifndef CLIENT_ADAPTOR_MGR_H
++#define CLIENT_ADAPTOR_MGR_H
++
++#include <map>
++#include <string>
++#include <iostream>
++#include <cstring>
++extern "C"
++{
++#include "ccm_interface.h"
++#include "conf_parser.h"
++}
++
++class ClientAdaptorMgr {
++public:
++  ClientAdaptorMgr(){}
++  virtual ~ClientAdaptorMgr(){}
++
++  virtual int32_t init_mgr() = 0;
++
++  virtual int32_t get_pt_num(uint32_t& num) = 0;
++
++  virtual int32_t get_pt_entry(uint32_t pt_index, PTViewPtEntry* entry) = 0;
++
++  virtual int32_t get_node_info(uint32_t node_id, NodeInfo* node_info) = 0;
++
++  virtual const std::string name(){
++    return "ClientAdaptorMgr";
++  }
++
++  const bool is_init_succeed();
++
++  void set_init_flag(bool flag);
++
++private:
++  bool init_flag = false;
++};
++
++class ClientAdaptorCcm : public ClientAdaptorMgr {
++public:
++  ClientAdaptorCcm(){}
++  ~ClientAdaptorCcm() override {}
++
++  int32_t init_mgr();  
++
++  int32_t get_pt_num(uint32_t& num);
++
++  int32_t get_pt_entry(uint32_t pt_index, PTViewPtEntry* entry);
++
++  int32_t get_node_info(uint32_t node_id, NodeInfo* node_info);
++  const std::string name() override {
++    return "ClientAdaptorCcm";
++  }
++
++private:
++}; 
++
++class ClientAdaptorLocal : public ClientAdaptorMgr {
++public:
++  ClientAdaptorLocal(){}
++  ~ClientAdaptorLocal() override {}
++ 
++  int32_t init_mgr(){
++    return 0;
++  }  
++  
++  int32_t get_pt_num(uint32_t& num){
++    num = 10;
++    return 0;
++  }
++  
++  int32_t get_pt_entry(uint32_t pt_index, PTViewPtEntry* entry){
++    entry->masterNodeId = pt_index % 3;
++    return 0;
++  }
++
++  int32_t get_node_info(uint32_t node_id, NodeInfo* node_info){
++    strcpy(node_info->ipv4AddrStr, "localhost");
++    node_info->ports[0] = 1234;
++    node_info->portNum = 1;
++    return 0;
++  }
++  const std::string name() override {
++    return "ClientAdaptorLocal";
++  }
++
++private:
++};
++
++
++#endif
+diff --git a/src/client_adaptor/ClientAdaptorMsg.cc b/src/client_adaptor/ClientAdaptorMsg.cc
+new file mode 100644
+index 00000000..432b4626
+--- /dev/null
++++ b/src/client_adaptor/ClientAdaptorMsg.cc
+@@ -0,0 +1,281 @@
++#include <iostream>
++
++#include "ClientAdaptorMsg.h"
++#include "ClientAdaptorMgr.h"
++
++
++
++#define RBD_DATA_OBJECT_NAME_FILTER_LEN 8
++#define RBD_DATA_OBJECT_NAME_LEN 27
++#define RBD_DATA_OBJECT_NAME "rbd_data"
++#define RGW_BUCKET_ID_LEN 36
++#define RGW_OBJECT_NAME_LEN 38
++
++#define SEGMENT_SIZE  4194304
++#define SEGMENT_MASK  0x3FFFFF
++
++#define OBJECT_ID_LEN 16
++
++ClientAdaptorMsg::ClientAdaptorMsg(ClientAdaptorMgr* mgr) : mgr_ref(mgr){
++}
++
++void ClientAdaptorMsg::push_strategy(Objecter *objecter, uint64_t pool_id, int32_t node_id, std::string oid_name, bufferlist &indata)
++{
++    const char *cls = "rpc";
++    const char *method = "das_prefetch";
++    vector<OSDOp> nops(1);
++    OSDOp &op = nops[0];
++    op.op.op = CEPH_OSD_OP_CALL;
++    op.op.cls.class_len = strlen(cls);
++    op.op.cls.method_len = strlen(method);
++    op.op.cls.indata_len = indata.length();
++    op.indata.append(cls, op.op.cls.class_len);
++    op.indata.append(method, op.op.cls.method_len);
++    op.indata.append(indata);
++    Objecter::Op *objecter_op = 
++	    new Objecter::Op(object_t(oid_name), object_locator_t(), nops, CEPH_OSD_FLAG_EXEC, NULL, NULL, NULL, nullptr);
++    objecter_op->target.osd = node_id;
++    objecter_op->target.base_oloc.pool = pool_id;
++    objecter_op->target.base_oid.name = oid_name;
++    objecter_op->target.flags = CEPH_OSD_FLAG_READ | CEPH_OSD_FLAG_WRITE;
++
++    objecter->op_submit(objecter_op);
++}
++
++void ClientAdaptorMsg::init_trans() {
++
++  return;
++}
++
++
++
++
++
++
++
++
++
++
++bool ClientAdaptorMsg::filter_msg(Objecter::op_target_t *t){
++
++  string obj_name = t->base_oid.name;	
++
++  if (obj_name.size() < RBD_DATA_OBJECT_NAME_LEN) {
++    return false;
++  }
++
++
++  if (obj_name.compare(0, RBD_DATA_OBJECT_NAME_FILTER_LEN, RBD_DATA_OBJECT_NAME) == 0){
++    return true;
++  }
++  if (obj_name.size() < RGW_OBJECT_NAME_LEN) {
++    return false;
++  }
++
++  if (obj_name.size() > (RGW_BUCKET_ID_LEN + 1) && obj_name.substr(RGW_BUCKET_ID_LEN, 1) == "."){
++    return true;
++  }
++
++  return false;
++}
++
++bool ClientAdaptorMsg::filter_msg_by_op(Objecter::Op *op){
++  return filter_msg(&op->target);
++}
++
++
++bool ClientAdaptorMsg::is_node(uint32_t index){
++  if (index >> FLAG_OFFSET_BIT){
++    return true;
++  }
++  return false;
++}
++
++
++
++
++int32_t ClientAdaptorMsg::get_node_id(string obj_name, int64_t pool_id, uint32_t& pt_id){
++  if (obj_name.length() == 0 || pool_id < 0){
++    std:cout << __func__ << " Client Adaptor: input parameter invalid!" << std::endl;
++    return -1;
++  }
++
++
++  string obj_id = to_string(pool_id);
++  obj_id += '_';
++  obj_id += obj_name;
++
++  hash<string> hash_str;
++  uint32_t obj_hashed_id = hash_str(obj_id);
++
++
++
++  uint32_t pt_num = 0;
++  NodeInfo info = {0};
++
++  if (mgr_ref->get_pt_num(pt_num)){
++    std::cout << __func__ << " Client Adaptor: Get PT number failed" << std::endl;
++    return -1;
++  }
++
++  if (pt_num == 0) {
++    std::cout << __func__ << " Client Adaptor: Get PT number zero" << std::endl;
++    return -1;
++  }
++
++
++  pt_id = obj_hashed_id % pt_num;
++
++
++  PTViewPtEntry pt_entry = {0};
++  if (mgr_ref->get_pt_entry(pt_id, &pt_entry)){
++    std::cout << __func__ << " Client Adaptor: Get PT entry failed" << std::endl;
++    return -1;
++  }
++  uint32_t node_id = pt_entry.masterNodeId << NODE_ID_OFFSET_BIT;
++
++  node_id += 0x1 << FLAG_OFFSET_BIT;
++
++  if (mgr_ref->get_node_info(pt_entry.masterNodeId, &info)){
++    std::cout << __func__ << " Client Adaptor: Get node info failed" << std::endl;
++    return -1;
++  }
++  if (info.portNum > PORT_SUPPORT_MAX || info.portNum == 0) {
++    std::cout << __func__ << " Client Adaptor: Port number invalid. Port Number: " << info.portNum  << std::endl;
++    return -1;
++  }
++  uint32_t pt_index = pt_entry.indexInNode;
++
++
++  node_id += pt_index % info.portNum;
++
++  return node_id;
++}
++
++
++
++
++int32_t ClientAdaptorMsg::get_node_ip(uint32_t node_index, string& node_ip){
++  uint32_t node_id = (node_index & NODE_ID_MASK) >> NODE_ID_OFFSET_BIT;
++  uint32_t port_index = node_index & PORT_INDEX_MASK;
++  NodeInfo info = {0};
++  if (mgr_ref->get_node_info(node_id, &info)){
++    std::cout << __func__ << " Client Adaptor: Get node info failed" << std::endl;
++    return -1;
++  }
++  uint32_t port = info.ports[port_index];
++  string addr_str = "tcp://";
++  addr_str += info.publicAddrStr;
++  addr_str += ":";
++  addr_str += to_string(port);
++  node_ip = addr_str;
++
++  return 0;
++}
++
++void ClientAdaptorMsg::set_mgr(ClientAdaptorMgr* mgr){
++  mgr_ref = mgr;
++  return;
++}
++
++ClientAdaptorMgr* ClientAdaptorMsg::get_mgr(){
++  return mgr_ref;
++}
++
++void das_req_prefetch(DasKvParam *params)
++{
++    ClientAdaptorMsg *msg_ref = static_cast<ClientAdaptorMsg *>(params->handle);
++    Objecter *obj = static_cast<Objecter *>(params->ctx);
++    if (msg_ref->is_valid_object(obj) ==false) {
++      return;
++    }
++    uint64_t offset = params->offset & SEGMENT_MASK;
++    int id = params->objId;
++    uint64_t left = params->len;
++    while(left) {
++        uint64_t max = std::min<uint64_t>(SEGMENT_SIZE - offset, left);
++
++	char buff[params->imageIdLen+OBJECT_ID_LEN + 1];
++	snprintf(buff, params->imageIdLen + 1, "%s", params->imageIdBuf);
++	snprintf(buff+params->imageIdLen, OBJECT_ID_LEN+1, "%016x", id);
++	std::string oid_name(buff);
++	uint32_t pt_id;
++	int32_t node_id = msg_ref->get_node_id(oid_name, params->cephPoolId, pt_id);
++	if (node_id < 0) {
++	    ceph_abort();
++	}
++	bufferlist indata;
++	encode(offset, indata);
++	encode(max, indata);
++	msg_ref->push_strategy(obj, params->cephPoolId, node_id, oid_name, indata);
++
++	left -= max;
++	offset = 0;
++	id++;
++    };
++}
++
++int32_t ClientAdaptorMsg::das_init(Objecter *obj)
++{
++    int32_t rc;
++    das_objs.insert(obj);
++    if (initialized)
++      return 0;
++    DasModuleParam *dasInstanceParam = new DasModuleParam();
++    DasOPS *regOps = new DasOPS();
++    regOps->SubmitDasPrefetch = das_req_prefetch;
++    dasInstanceParam->ops = regOps;
++
++    rc = Rcache_CeateDasModule(this, dasInstanceParam);
++    if (rc) {
++      return -1;
++    }
++    initialized = true;
++    return 0;
++}
++
++int32_t ClientAdaptorMsg::das_update_info(Objecter *obj, Objecter::Op *op)
++{
++    if (!initialized)
++      return 0;
++    DasKvParam *params[op->ops.size()];
++
++    if((op->target.flags & CEPH_OSD_FLAG_WRITE) == CEPH_OSD_FLAG_WRITE)
++      return 0;
++    string obj_name = op->target.base_oid.name;
++    if (obj_name.compare(0, RBD_DATA_OBJECT_NAME_FILTER_LEN, RBD_DATA_OBJECT_NAME))
++      return 0;
++    std::size_t found = obj_name.find_last_of('.');
++    if(found == std::string::npos)
++      return -EINVAL;
++    uint64_t objId = std::stol(obj_name.substr(found+1, OBJECT_ID_LEN), nullptr, 16);
++    uint64_t ns = ceph_clock_now().to_nsec();
++    int i = 0;
++    for(vector<OSDOp>::iterator p = op->ops.begin(); p != op->ops.end(); ++p) {
++    	if (p->op.op == CEPH_OSD_OP_READ || p->op.op == CEPH_OSD_OP_SPARSE_READ || p->op.op == CEPH_OSD_OP_SYNC_READ) {
++	    params[i] = reinterpret_cast<DasKvParam*>(new char[sizeof(DasKvParam) + found + 1]);
++	    params[i]->offset = p->op.extent.offset;
++	    params[i]->len = p->op.extent.length;
++	    params[i]->opcode = 0;
++	    params[i]->timeStamp = ns;
++	    params[i]->cephPoolId = op->target.base_oloc.pool;
++	    params[i]->algType = DAS_ALG_SEQ;
++	    params[i]->objId = objId;
++	    params[i]->imageIdLen =found + 1;
++	    memcpy(params[i]->imageIdBuf, obj_name.c_str(), params[i]->imageIdLen);
++	    params[i]->handle = this;
++	    params[i]->ctx = obj;
++	    i++;
++	}
++    }
++
++    if (i) {
++      int rc = Rcache_PutDasInfo(params, i);
++      if (rc)
++	 return -1;
++    }
++    return 0;
++}
++
++
++
+diff --git a/src/client_adaptor/ClientAdaptorMsg.h b/src/client_adaptor/ClientAdaptorMsg.h
+new file mode 100644
+index 00000000..a20d72a5
+--- /dev/null
++++ b/src/client_adaptor/ClientAdaptorMsg.h
+@@ -0,0 +1,72 @@
++#ifndef CLIENT_ADAPTOR_MSG_H
++#define CLIENT_ADAPTOR_MSG_H
++
++#include <string>
++#include <map>
++#include <stdint.h>
++#include "das.h"
++
++#include "osdc/Objecter.h"
++#include "ClientAdaptorMgr.h"
++
++class ClientAdaptorMsg {
++public:
++  ClientAdaptorMsg(ClientAdaptorMgr* mgr); 
++  ~ClientAdaptorMsg() {}; 
++
++void push_strategy(Objecter *objecter, uint64_t pool_id, int32_t node_id, std::string oid_name, bufferlist &indata);
++
++void init_trans();
++
++int32_t das_init(Objecter *obj);
++
++void das_remove(Objecter *obj) {
++  das_objs.erase(obj);
++  if (das_objs.empty() && initialized) {
++    initialized = false;
++    Rcache_ExitDasModule(this);
++  }
++}
++
++bool filter_msg(Objecter::op_target_t *t);
++
++bool filter_msg_by_op(Objecter::Op *op);
++
++const string name() {return "ClientAdaptorMsg";}
++
++bool is_node(uint32_t index);
++
++uint32_t get_node_index(std::string obj_name, int64_t pool_id);
++
++int32_t get_node_id(string obj_name, int64_t pool_id, uint32_t& pt_index);
++
++int32_t get_node_ip(uint32_t node_index, string& node_ip);
++
++void set_mgr(ClientAdaptorMgr* mgr);
++
++ClientAdaptorMgr* get_mgr(void);
++
++bool is_valid_object(Objecter *obj) {
++  auto it = das_objs.find(obj);
++  if (it != das_objs.end())
++    return true;
++  return false;
++}
++
++int32_t das_update_info(Objecter *obj, Objecter::Op *op);
++
++protected:
++  ClientAdaptorMgr* mgr_ref;
++
++  const int FLAG_OFFSET_BIT = 20;
++  const int PORT_INDEX_MASK = 0xf;
++  const int NODE_ID_OFFSET_BIT = 4;
++  const int NODE_ID_MASK = 0xffff0;
++  const int PORT_SUPPORT_MAX = 16;
++private:
++  bool initialized = false;
++  std::set<Objecter *> das_objs;
++};
++
++
++#endif
+diff --git a/src/client_adaptor/ClientAdaptorPerf.cc b/src/client_adaptor/ClientAdaptorPerf.cc
+new file mode 100644
+index 00000000..3a2ef77d
+--- /dev/null
++++ b/src/client_adaptor/ClientAdaptorPerf.cc
+@@ -0,0 +1,83 @@
++#include "ClientAdaptorPerf.h"
++#include "ClientAdaptorPlugin.h"
++using namespace std;
++
++#include <sys/syscall.h>
++#define gettid() syscall(__NR_gettid)
++
++void ClientAdaptorPerf::start_tick(Objecter::Op *op) {
++  gettimeofday(&(op->perf_tick.start), NULL);
++  return;
++}
++
++void ClientAdaptorPerf::end_tick(Objecter::Op *op) {
++  gettimeofday(&(op->perf_tick.end), NULL);
++  return;
++}
++  
++void ClientAdaptorPerf::record_op(Objecter::Op *op) {
++  for (vector<OSDOp>::iterator p = op->ops.begin(); p != op->ops.end(); ++p) {
++    if (p->op.op == CEPH_OSD_OP_READ || p->op.op == CEPH_OSD_OP_SPARSE_READ || p->op.op == CEPH_OSD_OP_SYNC_READ) {
++      read.op_count++;
++      read.time_cost += (op->perf_tick.end.tv_sec - op->perf_tick.start.tv_sec) * 1000 * 1000 + \
++             (op->perf_tick.end.tv_usec - op->perf_tick.start.tv_usec);
++    } else if (p->op.op == CEPH_OSD_OP_WRITE || p->op.op == CEPH_OSD_OP_WRITEFULL) {
++      write.op_count++;
++      write.time_cost += (op->perf_tick.end.tv_sec - op->perf_tick.start.tv_sec) * 1000 * 1000 + \
++	     (op->perf_tick.end.tv_usec-op->perf_tick.start.tv_usec);
++    }
++  }
++  return;
++}
++
++std::function<void ()> ClientAdaptorPerf::create_thread(const ClientAdaptorPlugin* in) {
++  const ClientAdaptorPlugin* plugin = in;
++  return [this, plugin](){
++    char thread_name[16];
++    sprintf(thread_name, "ca-perf-tick");
++    pthread_setname_np(pthread_self(), thread_name);
++    uint64_t read_cnt = 0;
++    uint64_t read_cost = 0;
++    uint64_t write_cnt = 0;
++    uint64_t write_cost = 0;
++    uint64_t read_lat = 0xff;
++    uint64_t write_lat = 0xff;
++    float avg_flight = 0;
++
++    while (!tick_done) {
++	    sleep (3);
++	    read_cnt = plugin->perf_ref->read.op_count;
++	    read_cost = plugin->perf_ref->read.time_cost;
++	    write_cnt = plugin->perf_ref->write.op_count;
++	    write_cost = plugin->perf_ref->write.time_cost;
++	    if (read_cnt != 0) {
++		    read_lat = read_cost/read_cnt;
++	    }
++	    if (write_cnt != 0) {
++		    write_lat = write_cost/write_cnt;
++	    }
++	    if ((read_cnt + write_cnt) != 0 ) {
++		    avg_flight = (float)total_in_flight / (float)(read_cnt + write_cnt);
++	    }
++	    outfile << "***************************************************************************" << std::endl;
++	    outfile << "PID: " << getpid() << "    TID: " << gettid() << std::endl;
++	    outfile << "          total_count     avg_latency(us)" << std::endl;
++	    outfile << "read " << setw(16) << read_cnt << "    " << setw(16) << read_lat << std::endl;
++	    outfile << "write" << setw(16) << write_cnt << "    " << setw(16) << write_lat << std::endl;
++	    outfile << "          total_count      average" << std::endl;
++	    outfile << "in-flight" << setw(12) << total_in_flight
++		    <<  "   " << setw(16) << fixed << setprecision(1) << avg_flight << std::endl;
++    }
++   };
++}
++
++void ClientAdaptorPerf::start_record(ClientAdaptorPlugin* plugin) {
++	std::function<void ()> perf_thread = create_thread(plugin);
++	threads.push_back(std::thread(perf_thread));
++	outfile.open("/var/log/ceph/perf_tick.log", ios::out | ios::app);
++	return;
++}
++
++
++
++
+diff --git a/src/client_adaptor/ClientAdaptorPerf.h b/src/client_adaptor/ClientAdaptorPerf.h
+new file mode 100644
+index 00000000..57ef6159
+--- /dev/null
++++ b/src/client_adaptor/ClientAdaptorPerf.h
+@@ -0,0 +1,50 @@
++#ifndef CLIENT_ADAPTOR_PERF_H
++#define CLIENT_ADAPTOR_PERF_H
++
++#include <stdint.h>
++#include <sys/time.h>
++#include <thread>
++#include <iomanip>
++#include <sched.h>
++#include <vector>
++#include <iostream>
++#include <fstream>
++
++#include "osdc/Objecter.h"
++
++class ClientAdaptorPlugin;
++
++class ClientAdaptorPerf {
++public:
++  ClientAdaptorPerf(){}
++  ~ClientAdaptorPerf(){}
++
++
++  struct op_perf_t {
++    std::atomic<uint64_t> op_count{0};
++    std::atomic<uint64_t> time_cost{0};
++  };
++
++void start_tick(Objecter::Op *op);
++
++void end_tick(Objecter::Op *op);
++  
++void record_op(Objecter::Op *op); 
++
++void start_record(ClientAdaptorPlugin* plugin); 
++
++std::function<void ()> create_thread(const ClientAdaptorPlugin* plugin);
++
++const string name() {return "ClientAdaptorPerf";}
++vector<std::thread> threads;
++bool tick_done{false};
++std::ofstream outfile;
++std::atomic<uint64_t> total_in_flight{0};
++private:
++  struct op_perf_t read;
++  struct op_perf_t write;
++
++};
++
++#endif
++
+diff --git a/src/client_adaptor/ClientAdaptorPlugin.cc b/src/client_adaptor/ClientAdaptorPlugin.cc
+new file mode 100644
+index 00000000..5c5d9527
+--- /dev/null
++++ b/src/client_adaptor/ClientAdaptorPlugin.cc
+@@ -0,0 +1,39 @@
++#include <iostream>
++#include "ClientAdaptorPlugin.h"
++#include "ceph_ver.h"
++#include "ClientAdaptorMsg.h"
++#include "ClientAdaptorMgr.h"
++#include "ClientAdaptorPerf.h"
++
++
++
++
++ClientAdaptorPlugin::~ClientAdaptorPlugin() {
++    delete mgr_ref;
++    delete msg_ref;
++    delete perf_ref;
++}
++
++const char *__ceph_plugin_version()
++{
++  return CEPH_GIT_NICE_VER;
++}
++
++
++int __ceph_plugin_init(CephContext *cct,
++		       const std::string& type,
++		       const std::string& name)
++{
++  PluginRegistry *instance = cct->get_plugin_registry();
++  if (cct->_conf.get_val<bool>("global_cache_debug_mode")){
++    ClientAdaptorLocal* ccm = new ClientAdaptorLocal();
++    ClientAdaptorMsg* msg = new ClientAdaptorMsg(ccm);
++    ClientAdaptorPerf* perf = new ClientAdaptorPerf();
++    return instance->add(type, name, new ClientAdaptorPlugin(cct, msg, ccm, perf));
++  } else {
++    ClientAdaptorCcm* ccm = new ClientAdaptorCcm();
++    ClientAdaptorMsg* msg = new ClientAdaptorMsg(ccm);
++    ClientAdaptorPerf* perf = new ClientAdaptorPerf();
++    return instance->add(type, name, new ClientAdaptorPlugin(cct, msg, ccm, perf));
++  }
++}
+diff --git a/src/client_adaptor/ClientAdaptorPlugin.h b/src/client_adaptor/ClientAdaptorPlugin.h
+new file mode 100644
+index 00000000..8685aad8
+--- /dev/null
++++ b/src/client_adaptor/ClientAdaptorPlugin.h
+@@ -0,0 +1,33 @@
++#ifndef CLIENT_ADAPTOR_PLUGIN_H
++#define CLIENT_ADAPTOR_PLUGIN_H
++#include <unistd.h>
++
++//#include "ceph_ver.h"
++#include "common/PluginRegistry.h"
++#include "common/ceph_context.h"
++//#include "acconfig.h"
++
++
++class ClientAdaptorMsg;
++class ClientAdaptorMgr;
++class ClientAdaptorPerf;
++
++class ClientAdaptorPlugin : public Plugin {
++public:
++  ClientAdaptorPlugin(CephContext* cct, ClientAdaptorMsg* msg, ClientAdaptorMgr* mgr,
++      ClientAdaptorPerf* perf) : Plugin(cct), msg_ref(msg), mgr_ref(mgr), perf_ref(perf)
++  {
++  }
++  
++  ~ClientAdaptorPlugin();
++
++  ClientAdaptorMsg* msg_ref;
++  ClientAdaptorMgr* mgr_ref;
++  ClientAdaptorPerf* perf_ref;
++
++  const string name() {
++    return "ClientAdaptorPlugin";
++  }
++};
++
++#endif
+diff --git a/src/common/options.cc b/src/common/options.cc
+index 8135ea8f..98df4758 100644
+--- a/src/common/options.cc
++++ b/src/common/options.cc
+@@ -1013,11 +1013,11 @@ std::vector<Option> get_global_options() {
+     Option("ms_die_on_bug", Option::TYPE_BOOL, Option::LEVEL_DEV)
+     .set_default(false)
+     .set_description("Induce a crash/exit on various bugs (for testing purposes)"),
+-
++#ifdef WITH_GLOBAL_CACHE
+     Option("ms_dispatch_throttle_bytes", Option::TYPE_SIZE, Option::LEVEL_ADVANCED)
+-    .set_default(100_M)
++    .set_default(0)
+     .set_description("Limit messages that are read off the network but still being processed"),
+-
++#endif
+     Option("ms_bind_ipv4", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
+     .set_default(true)
+     .set_description("Bind servers to IPv4 address(es)")
+@@ -2307,15 +2307,15 @@ std::vector<Option> get_global_options() {
+     Option("objecter_timeout", Option::TYPE_FLOAT, Option::LEVEL_ADVANCED)
+     .set_default(10.0)
+     .set_description("Seconds before in-flight op is considered 'laggy' and we query mon for the latest OSDMap"),
+-
++#ifdef WITH_GLOBAL_CACHE
+     Option("objecter_inflight_op_bytes", Option::TYPE_SIZE, Option::LEVEL_ADVANCED)
+-    .set_default(100_M)
++    .set_default(0)
+     .set_description("Max in-flight data in bytes (both directions)"),
+ 
+     Option("objecter_inflight_ops", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
+-    .set_default(1024)
++    .set_default(0)
+     .set_description("Max in-flight operations"),
+-
++#endif
+     Option("objecter_completion_locks_per_session", Option::TYPE_UINT, Option::LEVEL_DEV)
+     .set_default(32)
+     .set_description(""),
+@@ -5587,6 +5587,14 @@ std::vector<Option> get_global_options() {
+     Option("debug_heartbeat_testing_span", Option::TYPE_INT, Option::LEVEL_DEV)
+     .set_default(0)
+     .set_description("Override 60 second periods for testing only"),
++#ifdef WITH_GLOBAL_CACHE
++    Option("global_cache_debug_mode", Option::TYPE_BOOL, Option::LEVEL_DEV)
++    .set_default(false)
++    .set_description("Global Cache client adaptor local debug mode switch"),
++    Option("global_cache_tick", Option::TYPE_BOOL, Option::LEVEL_DEV)
++    .set_default(false)
++    .set_description("Global Cache client adaptor performance tick switch"),
++#endif
+   });
+ }
+ 
+@@ -7537,6 +7545,11 @@ static std::vector<Option> get_rbd_options() {
+     .set_default(60)
+     .set_min(0)
+     .set_description("RBD Image access timestamp refresh interval. Set to 0 to disable access timestamp update."),
++#ifdef WITH_GLOBAL_CACHE
++    Option("global_cache", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
++    .set_default(true)
++    .set_description("whether to enable global cache"),
++#endif
+   });
+ }
+ 
+diff --git a/src/include/config-h.in.cmake b/src/include/config-h.in.cmake
+index d83a59b2..7a0e4127 100644
+--- a/src/include/config-h.in.cmake
++++ b/src/include/config-h.in.cmake
+@@ -187,6 +187,9 @@
+ /* Define if you want to use Babeltrace */
+ #cmakedefine WITH_BABELTRACE
+ 
++
++#cmakedefine WITH_GLOBAL_CACHE
++
+ /* Define to 1 if you have the <babeltrace/babeltrace.h> header file. */
+ #cmakedefine HAVE_BABELTRACE_BABELTRACE_H 1
+ 
+diff --git a/src/librbd/ImageCtx.cc b/src/librbd/ImageCtx.cc
+index 8375d1a6..7ebcfce1 100644
+--- a/src/librbd/ImageCtx.cc
++++ b/src/librbd/ImageCtx.cc
+@@ -270,6 +270,18 @@ public:
+                         "wb", perf_prio, unit_t(UNIT_BYTES));
+     plb.add_time_avg(l_librbd_wr_latency, "wr_latency", "Write latency",
+                      "wl", perf_prio);
++#ifdef WITH_GLOBAL_CACHE
++    plb.add_time_avg(l_librbd_rd_before_queue_op_lat, "rd_before_queue_latency", "before queue latency",
++		    "rbql", perf_prio);
++    plb.add_time_avg(l_librbd_wr_before_queue_op_lat, "wr_before_queue_latency", "before queue latency",
++		    "wbql", perf_prio);
++    plb.add_time_avg(l_librbd_after_dequeue_op_lat, "after_dequeue_latency", "after dequeue latency",
++		    "adl", perf_prio);
++    plb.add_time_avg(l_librbd_send_lat, "send_latency", "send latency",
++		    "send", perf_prio);
++    plb.add_u64(l_librbd_rd_queue, "rqueue", "q", "q", PerfCountersBuilder::PRIO_USEFUL);
++    plb.add_u64(l_librbd_wr_queue, "wqueue", "q", "q", PerfCountersBuilder::PRIO_USEFUL);
++#endif
+     plb.add_u64_counter(l_librbd_discard, "discard", "Discards");
+     plb.add_u64_counter(l_librbd_discard_bytes, "discard_bytes", "Discarded data", NULL, 0, unit_t(UNIT_BYTES));
+     plb.add_time_avg(l_librbd_discard_latency, "discard_latency", "Discard latency");
+diff --git a/src/librbd/Types.h b/src/librbd/Types.h
+index 3f110447..c08978e2 100644
+--- a/src/librbd/Types.h
++++ b/src/librbd/Types.h
+@@ -22,6 +22,14 @@ enum {
+   l_librbd_wr,
+   l_librbd_wr_bytes,
+   l_librbd_wr_latency,
++#ifdef WITH_GLOBAL_CACHE
++  l_librbd_rd_before_queue_op_lat,
++  l_librbd_wr_before_queue_op_lat,
++  l_librbd_after_dequeue_op_lat,
++  l_librbd_send_lat,
++  l_librbd_wr_queue,
++  l_librbd_rd_queue,
++#endif
+   l_librbd_discard,
+   l_librbd_discard_bytes,
+   l_librbd_discard_latency,
+diff --git a/src/librbd/io/ImageDispatchSpec.h b/src/librbd/io/ImageDispatchSpec.h
+index 93c53a0f..7551fb0c 100644
+--- a/src/librbd/io/ImageDispatchSpec.h
++++ b/src/librbd/io/ImageDispatchSpec.h
+@@ -121,7 +121,11 @@ public:
+     return new ImageDispatchSpec(image_ctx, aio_comp, {}, Flush{flush_source},
+                                  0, parent_trace);
+   }
+-
++#ifdef WITH_GLOBAL_CACHE
++  AioCompletion* get_completion() {
++    return m_aio_comp;
++  }
++#endif
+   void send();
+   void fail(int r);
+ 
+diff --git a/src/librbd/io/ImageRequestWQ.cc b/src/librbd/io/ImageRequestWQ.cc
+index 34f2c2cf..cae0341a 100644
+--- a/src/librbd/io/ImageRequestWQ.cc
++++ b/src/librbd/io/ImageRequestWQ.cc
+@@ -286,7 +286,13 @@ void ImageRequestWQ<I>::aio_read(AioCompletion *c, uint64_t off, uint64_t len,
+   RWLock::RLocker owner_locker(m_image_ctx.owner_lock);
+   if (m_image_ctx.non_blocking_aio || writes_blocked() || !writes_empty() ||
+       require_lock_on_read()) {
++#ifdef WITH_GLOBAL_CACHE
++    ceph::timespan elapsed = coarse_mono_clock::now() - c->start_time;
++    m_image_ctx.perfcounter->tinc(l_librbd_rd_before_queue_op_lat, elapsed);
+     queue(ImageDispatchSpec<I>::create_read_request(
++#else
++    queue(ImageDispatchSpec<I>::create_read_request(
++#endif
+             m_image_ctx, c, {{off, len}}, std::move(read_result), op_flags,
+             trace));
+   } else {
+@@ -325,7 +331,13 @@ void ImageRequestWQ<I>::aio_write(AioCompletion *c, uint64_t off, uint64_t len,
+ 
+   RWLock::RLocker owner_locker(m_image_ctx.owner_lock);
+   if (m_image_ctx.non_blocking_aio || writes_blocked()) {
++#ifdef WITH_GLOBAL_CACHE
++    ceph::timespan elapsed = coarse_mono_clock::now() - c->start_time;
++    m_image_ctx.perfcounter->tinc(l_librbd_wr_before_queue_op_lat, elapsed);
++    queue(ImageDispatchSpec<I>::create_write_request(
++#else
+     queue(ImageDispatchSpec<I>::create_write_request(
++#endif
+             m_image_ctx, c, {{off, len}}, std::move(bl), op_flags, trace));
+   } else {
+     c->start_op();
+@@ -790,8 +802,16 @@ void ImageRequestWQ<I>::process(ImageDispatchSpec<I> *req) {
+   CephContext *cct = m_image_ctx.cct;
+   ldout(cct, 20) << "ictx=" << &m_image_ctx << ", "
+                  << "req=" << req << dendl;
+-
++#ifdef WITH_GLOBAL_CACHE
++  ceph::timespan elapsed = coarse_mono_clock::now() - req->get_completion()->start_time;
++  m_image_ctx.perfcounter->tinc(l_librbd_after_dequeue_op_lat, elapsed);
++  coarse_mono_time before_send = coarse_mono_clock::now();
++#endif
+   req->send();
++#ifdef WITH_GLOBAL_CACHE
++  ceph::timespan send_time = coarse_mono_clock::now() - before_send;
++  m_image_ctx.perfcounter->tinc(l_librbd_send_lat, send_time);
++#endif
+ 
+   finish_queued_io(req);
+   if (req->is_write_op()) {
+@@ -905,6 +925,10 @@ void ImageRequestWQ<I>::queue(ImageDispatchSpec<I> *req) {
+   } else {
+     m_queued_reads++;
+   }
++#ifdef WITH_GLOBAL_CACHE
++  m_image_ctx.perfcounter->set(l_librbd_rd_queue, m_queued_reads);
++  m_image_ctx.perfcounter->set(l_librbd_wr_queue, m_queued_writes);
++#endif
+ 
+   ThreadPool::PointerWQ<ImageDispatchSpec<I> >::queue(req);
+ }
+diff --git a/src/msg/Message.cc b/src/msg/Message.cc
+index d36a95eb..47d7dbb4 100644
+--- a/src/msg/Message.cc
++++ b/src/msg/Message.cc
+@@ -202,6 +202,8 @@
+ #include "messages/MOSDPGUpdateLogMissing.h"
+ #include "messages/MOSDPGUpdateLogMissingReply.h"
+ 
++#include "msg/Messenger.h"
++
+ #define DEBUGLVL  10    // debug level of output
+ 
+ #define dout_subsys ceph_subsys_ms
+@@ -932,12 +934,14 @@ void Message::decode_trace(bufferlist::const_iterator &p, bool create)
+   const auto msgr = connection->get_messenger();
+   const auto endpoint = msgr->get_trace_endpoint();
+   if (info.trace_id) {
+-    trace.init(get_type_name(), endpoint, &info, true);
++    trace.init(get_type_name().data(), endpoint, &info, true);
+     trace.event("decoded trace");
+   } else if (create || (msgr->get_myname().is_osd() &&
+                         msgr->cct->_conf->osd_blkin_trace_all)) {
+     // create a trace even if we didn't get one on the wire
+-    trace.init(get_type_name(), endpoint);
++    trace.init(get_type_name().data(), endpoint);
+     trace.event("created trace");
+   }
+   trace.keyval("tid", get_tid());
+diff --git a/src/osdc/Objecter.cc b/src/osdc/Objecter.cc
+index bc39114a..0688a02d 100644
+--- a/src/osdc/Objecter.cc
++++ b/src/osdc/Objecter.cc
+@@ -51,6 +51,15 @@
+ #include "common/errno.h"
+ #include "common/EventTrace.h"
+ 
++#ifdef WITH_GLOBAL_CACHE
++#include "client_adaptor/ClientAdaptorPlugin.h"
++#include "client_adaptor/ClientAdaptorMsg.h"
++#include "client_adaptor/ClientAdaptorMgr.h"
++#include "client_adaptor/ClientAdaptorPerf.h"
++#include "common/address_helper.h"
++#include <iomanip>
++#endif
++
+ using ceph::real_time;
+ using ceph::real_clock;
+ 
+@@ -236,6 +245,28 @@ void Objecter::init()
+ {
+   ceph_assert(!initialized);
+ 
++#ifdef WITH_GLOBAL_CACHE
++  PluginRegistry *reg = cct->get_plugin_registry();
++  auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
++  ceph_assert(plugin);
++
++  if ((static_cast<ClientAdaptorPlugin *>(plugin))->mgr_ref->init_mgr()){
++    ldout(cct, 3) << "Client Adaptor: " << __func__ << " Initiate manager failed" << dendl;
++    (static_cast<ClientAdaptorPlugin *>(plugin))->mgr_ref->set_init_flag(false);
++    ceph_abort();
++  }
++  (static_cast<ClientAdaptorPlugin *>(plugin))->mgr_ref->set_init_flag(true);
++  if (cct->_conf.get_val<bool>("global_cache")) {
++    if ((static_cast<ClientAdaptorPlugin *>(plugin))->msg_ref->das_init(this)){
++    ldout(cct, 3) << "Client Adaptor: " << __func__ << " Initiate DAS failed, close prefetch" << dendl;
++    }
++  }
++
++  if (cct->_conf.get_val<bool>("global_cache_tick")) {
++    plugin->perf_ref->start_record(plugin);
++  }
++#endif
++
+   if (!logger) {
+     PerfCountersBuilder pcb(cct, "objecter", l_osdc_first, l_osdc_last);
+ 
+@@ -400,11 +431,27 @@ void Objecter::shutdown()
+ {
+   ceph_assert(initialized);
+ 
++
+   unique_lock wl(rwlock);
+ 
+   initialized = false;
+ 
+   wl.unlock();
++#ifdef WITH_GLOBAL_CACHE
++  PluginRegistry *reg = cct->get_plugin_registry();
++  auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
++  ceph_assert(plugin);
++  if (cct->_conf.get_val<bool>("global_cache_tick")) {
++    plugin->perf_ref->tick_done = true;
++    plugin->perf_ref->threads[0].join();
++    plugin->perf_ref->outfile.close();
++  }
++  if (plugin){
++    plugin->msg_ref->das_remove(this);
++    std::lock_guard l(reg->lock);
++    reg->remove("global_cache", "client_adaptor_plugin");
++  }
++#endif
+   cct->_conf.remove_observer(this);
+   wl.lock();
+ 
+@@ -1234,12 +1281,26 @@ void Objecter::handle_osd_map(MOSDMap *m)
+ 			 need_resend_linger, need_resend_command, sul,
+ 			 &m->gap_removed_snaps);
+ 	  ++p;
++#ifdef WITH_GLOBAL_CACHE
++    PluginRegistry *reg = cct->get_plugin_registry();
++    auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
++    ceph_assert(plugin);
++    if (plugin->msg_ref->is_node(s->osd)) {
++      // osd means one Global Cache connection
++      ldout(cct, 3) << "Client Adaptor: " << __func__ << " bypass close osd session for 0x" << hex << s->osd << dendl;
++    } else if (!osdmap->is_up(s->osd) ||
++	 (s->con &&
++	  s->con->get_peer_addrs() != osdmap->get_addrs(s->osd))) {
++      close_session(s);
++    }
++#else
+ 	  // osd down or addr change?
+ 	  if (!osdmap->is_up(s->osd) ||
+ 	      (s->con &&
+ 	       s->con->get_peer_addrs() != osdmap->get_addrs(s->osd))) {
+ 	    close_session(s);
+ 	  }
++#endif
+ 	}
+ 
+ 	ceph_assert(e == osdmap->get_epoch());
+@@ -1772,6 +1833,49 @@ int Objecter::_get_session(int osd, OSDSession **session, shunique_lock& sul)
+     return 0;
+   }
+ 
++#ifdef WITH_GLOBAL_CACHE
++  PluginRegistry *reg = cct->get_plugin_registry();
++  auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
++  ceph_assert(plugin);
++  map<int,OSDSession*>::iterator p = osd_sessions.find(osd);
++
++  if (p != osd_sessions.end()) {
++    OSDSession *s = p->second;
++    s->get();
++    *session = s;
++    ldout(cct, 20) << __func__ << " s=" << s << " osd=" << osd << " "
++	 << s->get_nref() << dendl;
++    return 0;
++  }
++  if (!sul.owns_lock()) {
++    return -EAGAIN;
++  }
++
++  OSDSession *s = nullptr;
++  // osd_entry = osd;
++  if (plugin->msg_ref->is_node(osd)) {
++    string node_ip = "";
++    if (plugin->msg_ref->get_node_ip(osd, node_ip)){
++      ldout(cct, 3) << "Client Adaptor: " << __func__ << " Get node ip failed" << dendl;
++      ceph_abort();
++    }
++
++    //osd_entry &=~(0xfffc0);
++    ldout(cct, 3) << "Client Adaptor: " << __func__ << " osd = 0x" << hex << osd << dendl;
++    ldout(cct, 3) << "Client Adaptor: " << __func__ << " ip address = " << node_ip.c_str() << dendl;
++    entity_addr_t node_addr;
++    entity_addr_from_url(&node_addr, node_ip.c_str());
++    node_addr.set_type(entity_addr_t::TYPE_MSGR2);
++    entity_addrvec_t node_addrs(node_addr);
++    s = new OSDSession(cct, osd);
++    osd_sessions[osd] = s;
++    s->con = messenger->connect_to_osd(node_addrs);
++  } else {
++    s = new OSDSession(cct, osd);
++    osd_sessions[osd] = s;
++    s->con = messenger->connect_to_osd(osdmap->get_addrs(osd));
++  }
++#else
+   map<int,OSDSession*>::iterator p = osd_sessions.find(osd);
+   if (p != osd_sessions.end()) {
+     OSDSession *s = p->second;
+@@ -1787,6 +1891,7 @@ int Objecter::_get_session(int osd, OSDSession **session, shunique_lock& sul)
+   OSDSession *s = new OSDSession(cct, osd);
+   osd_sessions[osd] = s;
+   s->con = messenger->connect_to_osd(osdmap->get_addrs(osd));
++#endif
+   s->con->set_priv(RefCountedPtr{s});
+   logger->inc(l_osdc_osd_session_open);
+   logger->set(l_osdc_osd_sessions, osd_sessions.size());
+@@ -2453,6 +2558,17 @@ void Objecter::_op_submit(Op *op, shunique_lock& sul, ceph_tid_t *ptid)
+   _session_op_assign(s, op);
+ 
+   if (need_send) {
++#ifdef WITH_GLOBAL_CACHE
++    PluginRegistry *reg = cct->get_plugin_registry();
++    auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
++    ceph_assert(plugin);
++    if (plugin->msg_ref->filter_msg_by_op(op)){
++      plugin->msg_ref->das_update_info(this, op);
++      if (cct->_conf.get_val<bool>("global_cache_tick")) {
++        plugin->perf_ref->start_tick(op);
++      }
++    }
++#endif
+     _send_op(op);
+   }
+ 
+@@ -2770,6 +2886,229 @@ void Objecter::_prune_snapc(
+   }
+ }
+ 
++#ifdef WITH_GLOBAL_CACHE
++int Objecter::_calc_target(op_target_t *t, Connection *con, bool any_change)
++{
++  PluginRegistry *reg = cct->get_plugin_registry();
++  auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
++  ceph_assert(plugin);
++  if (plugin->msg_ref->filter_msg(t)){
++    t->target_oid = t->base_oid;
++    t->target_oloc = t->base_oloc;
++    ldout(cct, 3) << " Client Adaptor: " << __func__ << " msg filter pass to Global Cache" << dendl;
++    int64_t pool_id = t->base_oloc.pool;
++    uint32_t pt_id;
++    int32_t node_id = plugin->msg_ref->get_node_id(t->base_oid.name, pool_id, pt_id);
++    if (node_id < 0) {
++      ldout(cct, 3) << "Client Adaptor: " << __func__ << " Get node id failed" << dendl;
++      ceph_abort();
++    }
++    ldout(cct, 3) << "Client Adaptor: " << __func__ << " Send to PT " << pt_id << dendl;
++    t->actual_pgid.pgid.set_pool(t->base_oloc.pool);
++    ldout(cct, 3) << "Client Adaptor: " << __func__ << " Pool ID = " << t->actual_pgid.pgid.m_pool << dendl;
++    ldout(cct, 3) << "Client Adaptor: " << __func__ << " Seed = " << t->actual_pgid.pgid.m_seed << dendl;
++    t->actual_pgid.pgid.set_ps(pt_id);
++    t->osd = node_id;
++    return RECALC_OP_TARGET_NO_ACTION;
++  } else {
++    // rwlock is locked
++    bool is_read = t->flags & CEPH_OSD_FLAG_READ;
++    bool is_write = t->flags & CEPH_OSD_FLAG_WRITE;
++    t->epoch = osdmap->get_epoch();
++    ldout(cct,20) << __func__ << " epoch " << t->epoch
++      << " base " << t->base_oid << " " << t->base_oloc
++      << " precalc_pgid " << (int)t->precalc_pgid
++      << " pgid " << t->base_pgid
++      << (is_read ? " is_read" : "")
++      << (is_write ? " is_write" : "")
++      << dendl;
++
++    const pg_pool_t *pi = osdmap->get_pg_pool(t->base_oloc.pool);
++    if (!pi) {
++      t->osd = -1;
++      return RECALC_OP_TARGET_POOL_DNE;
++    }
++    ldout(cct,30) << __func__ << " base pi " << pi
++      << " pg_num " << pi->get_pg_num() << dendl;
++
++    bool force_resend = false;
++    if (osdmap->get_epoch() == pi->last_force_op_resend) {
++      if (t->last_force_resend < pi->last_force_op_resend) {
++        t->last_force_resend = pi->last_force_op_resend;
++	force_resend = true;
++      } else if (t->last_force_resend == 0) {
++        force_resend = true;
++      }
++    }
++
++    //apply tiering
++    t->target_oid = t->base_oid;
++    t->target_oloc = t->base_oloc;
++    if ((t->flags & CEPH_OSD_FLAG_IGNORE_OVERLAY) == 0) {
++      if (is_read && pi->has_read_tier())
++	t->target_oloc.pool = pi->read_tier;
++      if (is_write && pi->has_write_tier())
++	t->target_oloc.pool = pi->write_tier;
++      pi = osdmap->get_pg_pool(t->target_oloc.pool);
++      if (!pi) {
++        t->osd = -1;
++	return RECALC_OP_TARGET_POOL_DNE;
++      }
++    }
++
++    pg_t pgid;
++    if (t->precalc_pgid) {
++      ceph_assert(t->flags & CEPH_OSD_FLAG_IGNORE_OVERLAY);
++      ceph_assert(t->base_oid.name.empty()); //make sure this is a pg op 
++      ceph_assert(t->base_oloc.pool == (int64_t)t->base_pgid.pool());
++      pgid = t->base_pgid;
++    } else {
++      int ret = osdmap->object_locator_to_pg(t->target_oid, t->target_oloc,
++	      pgid);
++      if (ret == -ENOENT) {
++        t->osd = -1;
++	return RECALC_OP_TARGET_POOL_DNE;
++      }
++    }
++    ldout(cct,20) << __func__ << " target " << t->target_oid << " "
++      << t->target_oloc << " -> pgid " << pgid << dendl;
++    ldout(cct,30) << __func__ << " target pi " << pi
++      <<" pg_num " << pi->get_pg_num() << dendl;
++    t->pool_ever_existed = true;
++
++    int size = pi->size;
++    int min_size = pi->min_size;
++    unsigned pg_num = pi->get_pg_num();
++    unsigned pg_num_pending = pi->get_pg_num_pending();
++    int up_primary, acting_primary;
++    vector<int> up, acting;
++    osdmap->pg_to_up_acting_osds(pgid, &up, &up_primary,
++	      &acting, &acting_primary);
++    bool sort_bitwise = osdmap->test_flag(CEPH_OSDMAP_SORTBITWISE);
++    bool recovery_deletes = osdmap->test_flag(CEPH_OSDMAP_RECOVERY_DELETES);
++    unsigned prev_seed = ceph_stable_mod(pgid.ps(), t->pg_num, t->pg_num_mask);
++    pg_t prev_pgid(prev_seed, pgid.pool());
++    if (any_change && PastIntervals::is_new_interval(
++    t->acting_primary,
++    acting_primary,
++    t->acting,
++    acting,
++    t->up_primary,
++    up_primary,
++    t->up,
++    up,
++    t->size,
++    size,
++    t->min_size,
++    min_size,
++    t->pg_num,
++    pg_num,
++    t->pg_num_pending,
++    pg_num_pending,
++    t->sort_bitwise,
++    sort_bitwise,
++    t->recovery_deletes,
++    recovery_deletes,
++    prev_pgid)) {
++      force_resend = true;
++    }
++
++    bool unpaused = false;
++    bool should_be_paused = target_should_be_paused(t);
++    if (t->paused && !should_be_paused) {
++      unpaused = true;
++    }
++    t->paused = should_be_paused;
++
++    bool legacy_change = 
++      t->pgid != pgid ||
++        is_pg_changed(
++    t->acting_primary, t->acting, acting_primary, acting,
++    t->used_replica || any_change);
++    bool split_or_merge = false;
++    if (t->pg_num) {
++      split_or_merge = 
++	prev_pgid.is_split(t->pg_num, pg_num, nullptr) ||
++	prev_pgid.is_merge_source(t->pg_num, pg_num, nullptr) ||
++	prev_pgid.is_merge_target(t->pg_num, pg_num);
++    }
++
++    if (legacy_change || split_or_merge || force_resend) {
++      t->pgid = pgid;
++      t->acting = acting;
++      t->acting_primary = acting_primary;
++      t->up_primary = up_primary;
++      t->up = up;
++      t->size = size;
++      t->min_size = min_size;
++      t->pg_num = pg_num;
++      t->pg_num_mask = pi->get_pg_num_mask();
++      t->pg_num_pending = pg_num_pending;
++      osdmap->get_primary_shard(
++	pg_t(ceph_stable_mod(pgid.ps(), t->pg_num, t->pg_num_mask), pgid.pool()),
++	&t->actual_pgid);
++      t->sort_bitwise = sort_bitwise;
++      t->recovery_deletes = recovery_deletes;
++      ldout(cct, 10) << __func__ << " "
++	<< " raw pgid " << pgid << " -> actual " << t->actual_pgid
++        << " acting " << acting
++        << " primary " << acting_primary << dendl;
++      t->used_replica = false;
++      if (acting_primary == -1) {
++        t->osd = -1;
++      } else {
++        int osd;
++	bool read = is_read && !is_write;
++	if (read && (t->flags & CEPH_OSD_FLAG_BALANCE_READS)) {
++    int p = rand() % acting.size();
++    if (p)
++      t->used_replica = true;
++    osd = acting[p];
++    ldout(cct, 10) << " chose random osd." << osd << " of " << acting
++	    << dendl;
++	} else if (read && (t->flags & CEPH_OSD_FLAG_LOCALIZE_READS) &&
++      acting.size() > 1) {
++    
++
++    int best = -1;
++    int best_locality = 0;
++    for (unsigned i = 0; i < acting.size(); ++i) {
++      int locality = osdmap->crush->get_common_ancestor_distance(
++      cct, acting[i], crush_location);
++      ldout(cct, 20) << __func__ << " localize: rank " << i
++	<< " osd." << acting[i]
++	<< " locality " << locality << dendl;
++      if (i == 0 ||
++          (locality >= 0 && best_locality >= 0 &&
++	   locality < best_locality) ||
++	   (best_locality < 0 && locality >= 0)) {
++        best = i;
++        best_locality = locality;
++        if (i)
++          t->used_replica = true;
++      }
++    }
++    ceph_assert(best >= 0);
++    osd = acting[best];
++	} else {
++    osd = acting_primary;
++	}
++	t->osd = osd;
++      }      
++    }
++    if (legacy_change || unpaused || force_resend) {
++      return RECALC_OP_TARGET_NEED_RESEND;
++    }
++    if (split_or_merge &&
++	(osdmap->require_osd_release >= CEPH_RELEASE_LUMINOUS ||
++	 HAVE_FEATURE(osdmap->get_xinfo(acting_primary).features,
++	   RESEND_ON_SPLIT))) {
++      return RECALC_OP_TARGET_NEED_RESEND;
++    }
++    return RECALC_OP_TARGET_NO_ACTION;
++  }
++}
++#else
+ int Objecter::_calc_target(op_target_t *t, Connection *con, bool any_change)
+ {
+   // rwlock is locked
+@@ -2968,6 +3307,8 @@ int Objecter::_calc_target(op_target_t *t, Connection *con, bool any_change)
+   }
+   return RECALC_OP_TARGET_NO_ACTION;
+ }
++#endif
++
+ 
+ int Objecter::_map_session(op_target_t *target, OSDSession **s,
+ 			   shunique_lock& sul)
+@@ -3271,6 +3612,38 @@ void Objecter::_send_op(Op *op)
+   if (op->trace.valid()) {
+     m->trace.init("op msg", nullptr, &op->trace);
+   }
++
++#ifdef WITH_GLOBAL_CACHE
++  ldout(cct, 3) << "Client Adaptor: " << __func__ << " msg-type = 0x" << hex << m->get_type() << dendl;
++  if (m->get_type() == CEPH_MSG_OSD_OP) {
++    MOSDOp *mosdop = static_cast<MOSDOp *>(m);
++    ldout(cct, 3) << "Client Adaptor: " << __func__ << " MOSDOp object name = " << mosdop->get_oid().name << dendl;
++    ldout(cct, 3) << "Client Adaptor: " << __func__ << " Request ID = " << mosdop->get_reqid().tid << dendl;
++    string cname, mname;
++    uint32_t pt_index = mosdop->get_pg().m_seed;
++    uint64_t pool_id = mosdop->get_pg().m_pool;
++    ldout(cct, 3) << "Client Adaptor: " << __func__ << " PT ID = " << pt_index << " Pool ID = " << pool_id << dendl;
++    int index = 0;
++    for (auto op : mosdop->ops) {
++      ldout(cct, 3) << "Client Adaptor: " << __func__ << " index = " << index
++	      << " op-code = 0x" << hex << op.op.op << dendl;
++
++      index++;
++      if (op.op.op == CEPH_OSD_OP_READ || op.op.op == CEPH_OSD_OP_WRITE || op.op.op == CEPH_OSD_OP_SPARSE_READ ||
++	     op.op.op == CEPH_OSD_OP_WRITEFULL || op.op.op == CEPH_OSD_OP_SYNC_READ) {
++        ldout(cct, 3) << "Client Adaptor: " << __func__ << " offset = 0x" << hex << op.op.extent.offset
++               << " length = 0x" << hex << op.op.extent.length << dendl;
++      }
++      if (op.op.op == CEPH_OSD_OP_CALL) {
++        auto bp = op.indata.cbegin();
++	bp.copy(op.op.cls.class_len, cname);
++	bp.copy(op.op.cls.method_len, mname);
++	ldout(cct, 3) << "Client Adaptor: " << __func__ << " op call class: " << cname << " method: " << mname << dendl;
++
++      }
++    }
++  }
++#endif
++
+   op->session->con->send_message(m);
+ }
+ 
+@@ -3348,7 +3721,11 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
+     m->put();
+     return;
+   }
+-
++#ifdef WITH_GLOBAL_CACHE
++  PluginRegistry *reg = cct->get_plugin_registry();
++  auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
++  ceph_assert(plugin);
++#endif
+   OSDSession::unique_lock sl(s->lock);
+ 
+   map<ceph_tid_t, Op *>::iterator iter = s->ops.find(tid);
+@@ -3445,6 +3822,16 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
+ 
+   sul.unlock();
+ 
++#ifdef WITH_GLOBAL_CACHE
++  if (cct->_conf.get_val<bool>("global_cache_tick")) {
++    if (plugin->msg_ref->filter_msg_by_op(op)){
++      plugin->perf_ref->end_tick(op);
++      plugin->perf_ref->record_op(op);
++      plugin->perf_ref->total_in_flight += num_in_flight;
++    }
++  }
++#endif
++
+   if (op->objver)
+     *op->objver = m->get_user_version();
+   if (op->reply_epoch)
+diff --git a/src/osdc/Objecter.h b/src/osdc/Objecter.h
+index ca8d85f7..83d71ad7 100644
+--- a/src/osdc/Objecter.h
++++ b/src/osdc/Objecter.h
+@@ -1341,7 +1341,13 @@ public:
+     int incarnation;
+ 
+     op_target_t target;
+-
++#ifdef WITH_GLOBAL_CACHE
++    struct perf_tick_t {
++      struct timeval start;
++      struct timeval end;
++    };
++    perf_tick_t perf_tick;
++#endif
+     ConnectionRef con;  // for rx buffer only
+     uint64_t features;  // explicitly specified op features
+ 
+diff --git a/src/test/CMakeLists.txt b/src/test/CMakeLists.txt
+index 5dcee169..fc342ccb 100644
+--- a/src/test/CMakeLists.txt
++++ b/src/test/CMakeLists.txt
+@@ -31,6 +31,13 @@ add_subdirectory(fs)
+ add_subdirectory(journal)
+ add_subdirectory(libcephfs)
+ add_subdirectory(librados)
++
++# Client adaptor
++if(WITH_GLOBAL_CACHE)
++	add_subdirectory(ClientAdaptorTest)
++	add_subdirectory(ServerAdaptorSimulate)
++endif()
++
+ add_subdirectory(librados_test_stub)
+ if(WITH_LIBRADOSSTRIPER)
+   add_subdirectory(libradosstriper)
+diff --git a/src/test/ClientAdaptorTest/CMakeLists.txt b/src/test/ClientAdaptorTest/CMakeLists.txt
+new file mode 100644
+index 00000000..2eb494c3
+--- /dev/null
++++ b/src/test/ClientAdaptorTest/CMakeLists.txt
+@@ -0,0 +1,11 @@
++# unittest_client_adaptor
++
++add_executable(client_adaptor_plugin_test
++  ClientAdaptorTest.cc
++  $<TARGET_OBJECTS:unit-main>
++  )
++target_link_libraries(client_adaptor_plugin_test global ${UNITTEST_LIBS} ceph_client_adaptor_plugin)
++
++# add_ceph_unittest(client_adaptor_test)
++
++message(STATUS "Client adaptor test cmake executing...")
+diff --git a/src/test/ClientAdaptorTest/ClientAdaptorTest.cc b/src/test/ClientAdaptorTest/ClientAdaptorTest.cc
+new file mode 100644
+index 00000000..694c69bd
+--- /dev/null
++++ b/src/test/ClientAdaptorTest/ClientAdaptorTest.cc
+@@ -0,0 +1,370 @@
++#include <iostream>
++#include <string.h>
++#include <iomanip>
++
++#include "gtest/gtest.h"
++#include "global/global_context.h"
++
++#include "client_adaptor/ClientAdaptorPlugin.h"
++#include "client_adaptor/ClientAdaptorMsg.h"
++#include "client_adaptor/ClientAdaptorMgr.h"
++#include "client_adaptor/ClientAdaptorPerf.h"
++#include "ccm_interface.h"
++#include "osdc/Objecter.h"
++
++class ClientAdaptorCcmMock : public ClientAdaptorMgr{
++public:
++  ClientAdaptorCcmMock(){}
++  ~ClientAdaptorCcmMock() override {}
++  int32_t init_mgr() override {
++    std::cout << "Client Adaptor: Init CCM Mock successfully" << std::endl;
++    return 0;
++  }
++
++  int32_t get_pt_num(uint32_t& num) override {
++    num = 32;
++    std::cout << "Client Adaptor: Get total PT number is" << num << std::endl;
++
++    return 0;
++  }
++
++  int32_t get_pt_entry(uint32_t pt_index, PTViewPtEntry* entry) override {
++    std::cout << "Client Adaptor: PT index is" << pt_index << std::endl;
++    entry->masterNodeId = pt_index % 3;
++    std::cout << "Client Adaptor: PT entry master node id is" << entry->masterNodeId << std::endl;
++    return 0;
++  }
++
++  int32_t get_node_info(uint32_t node_id, NodeInfo* node_info) override {
++    strcpy(node_info->ipv4AddrStr, "192.168.200.2");
++    node_info->ports[0] = 68;
++    node_info->portNum = 1;
++    return 0 ;
++  }
++
++  const string name() override {
++      return "ClientAdaptorCcmMock";
++  }
++};
++
++class ClientAdaptorTest : public ::testing::Test,
++	public ::testing::WithParamInterface<const char*> {
++public:
++  string plugin;
++
++  ClientAdaptorTest(){
++  }
++  ~ClientAdaptorTest() override {
++  }
++
++  void SetUp() override {
++    std::cout << "Client Adaptor: test setup" << std::endl;
++
++    return;
++  }
++  void TearDown() override {
++    std::cout << "Client Adaptor: test teardown" << std::endl;
++    PluginRegistry *reg = g_ceph_context->get_plugin_registry();
++    lock_guard l(reg->lock);
++    reg->remove("global_cache", "client_adaptor_plugin");
++
++    return;
++  }
++};
++
++TEST_P(ClientAdaptorTest, PluginTest)
++{
++  PluginRegistry *reg = g_ceph_context->get_plugin_registry();
++  ASSERT_TRUE(reg);
++
++  auto dirName = g_ceph_context->_conf.get_val<string>("plugin_dir");
++  std::cout << "Client Adaptor: plugin diractory name = " << dirName << std::endl;
++
++  auto plugin = dynamic_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
++  ASSERT_TRUE(plugin);
++  std::cout << "Plugin address = " << plugin << std::endl;
++  
++
++  std::cout << "Client Adaptor: plugin name = " << plugin->name() << std::endl;
++  EXPECT_STREQ("ClientAdaptorPlugin", plugin->name().c_str());
++
++  auto msg=plugin->msg_ref;
++  std::cout << "Client Adaptor: msg name = " << msg->name() << std::endl;
++  EXPECT_STREQ("ClientAdaptorMsg", msg->name().c_str());
++
++  auto mgr=plugin->mgr_ref;
++  std::cout << "Client Adaptor: mgr name = " << mgr->name() << std::endl;
++  std::lock_guard l(reg->lock);
++  reg->remove("global_cache", "client_adaptor_plugin");
++
++  return;
++}
++
++TEST_P(ClientAdaptorTest, PluginRegistryTest)
++{
++  PluginRegistry *reg = g_ceph_context->get_plugin_registry();
++  ASSERT_TRUE(reg);
++
++  std::cout << "Client Adaptor: Plugin registry map before global cache insert:" << std::endl;
++  for(auto it : reg->plugins) {
++  std::cout << it.first << "---" << it.second << std::endl;
++  }
++
++  std::cout << "Client Adaptor: Plugin registry map after global cache insert:" << std::endl;
++  auto plugin = dynamic_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
++  ASSERT_TRUE(plugin);
++  std::cout << "Client Adaptor: Plugin address = " << plugin << std::endl;
++  
++  for(auto it : reg->plugins) {
++  std::cout << "Client Adaptor: " << it.first << "---" << it.second << std::endl;
++  }
++
++  std::lock_guard l(reg->lock);
++  reg->remove("global_cache", "client_adaptor_plugin");
++  return;
++}
++
++TEST_P(ClientAdaptorTest, CalNodeIpNormalTest)
++{
++
++  PluginRegistry *reg = g_ceph_context->get_plugin_registry();
++  ASSERT_TRUE(reg);
++  auto plugin = dynamic_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
++  ASSERT_TRUE(plugin);
++  
++  ClientAdaptorCcmMock* ccm_mock = new ClientAdaptorCcmMock();
++  ClientAdaptorMgr* mgr = plugin->msg_ref->get_mgr();
++  std::cout << "Client Adaptor: Before DI Mgr subclass is " << mgr->name() << std::endl;
++  plugin->msg_ref->set_mgr(ccm_mock);
++  mgr = plugin->msg_ref->get_mgr();
++  std::cout << "Client Adaptor: After DI Mgr subclass is " << mgr->name() << std::endl;
++  EXPECT_STREQ("ClientAdaptorCcmMock", mgr->name().c_str());
++
++  string obj_name = "rbd_data.135421846e0f.0000000000000056";
++  uint64_t pool_id = 3;
++  uint32_t pt_index;
++  uint32_t node_id = plugin->msg_ref->get_node_id(obj_name, pool_id, pt_index);
++  std::cout << "Client Adaptor: PT id  is " << pt_index << std::endl;
++  std::cout << "Client Adaptor: Hashed node id is 0x " << hex << node_id << std::endl;
++  EXPECT_EQ((uint32_t)0x100001, node_id);
++
++  string node_ip = "";
++  EXPECT_EQ(0, plugin->msg_ref->get_node_ip(node_id, node_ip));
++  std::cout << "Client Adaptor: Node IP =  " << node_ip << std::endl;
++  EXPECT_STREQ("tcp://192.168.200.2:68", node_ip.c_str());
++
++  std::lock_guard l(reg->lock);
++  reg->remove("global_cache", "client_adaptor_plugin");
++  delete ccm_mock;
++  return;
++}
++
++TEST_P(ClientAdaptorTest, DasUpdateInfoTest)
++{
++
++  PluginRegistry *reg = g_ceph_context->get_plugin_registry();
++  ASSERT_TRUE(reg);
++  auto plugin = dynamic_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
++  ASSERT_TRUE(plugin);
++  
++  Objecter tObj(g_ceph_context, NULL, NULL, NULL, 0, 0);
++  plugin->msg_ref->das_init(&tObj);
++  const char *cls = "hello";
++  const char *method = "say_hello";
++  string obj_name = "70ac98a7:::7a3ead19-df4f-4019-a4c2-38c52299e348.4389.1_test5";
++  bufferlist indata;
++  vector<OSDOp> nops(1);
++  OSDOp &op = nops[0];
++
++  op.op.op = CEPH_OSD_OP_CALL;
++  op.op.cls.class_len = strlen(cls);
++  op.op.cls.method_len = strlen(method);
++  op.op.cls.indata_len = indata.length();
++  op.indata.append(cls, op.op.cls.class_len);
++  op.indata.append(method, op.op.cls.method_len);
++  op.indata.append(indata);
++  Objecter::Op *objecter_op =
++	  new Objecter::Op(object_t(obj_name), object_locator_t(), nops, CEPH_OSD_FLAG_EXEC, NULL, NULL ,NULL, nullptr);
++
++  plugin->msg_ref->das_update_info(&tObj, objecter_op);
++  plugin->msg_ref->das_update_info(&tObj, objecter_op);
++  objecter_op->target.flags = CEPH_OSD_FLAG_WRITE;
++  plugin->msg_ref->das_update_info(&tObj, objecter_op);
++  objecter_op->target.flags = CEPH_OSD_FLAG_READ;
++  plugin->msg_ref->das_update_info(&tObj, objecter_op);
++  objecter_op->target.base_oid.name = "rbd_data-135421846e0f-0000000000000056";
++  plugin->msg_ref->das_update_info(&tObj, objecter_op);
++  objecter_op->target.base_oid.name = "rbd_data.135421846e0f.0000000000000056";
++  plugin->msg_ref->das_update_info(&tObj, objecter_op);
++  OSDOp rop;
++  rop.op.op = CEPH_OSD_OP_READ;
++  rop.op.extent.offset = 10;
++  rop.op.extent.length = 4096;
++  objecter_op->ops.push_back(rop);
++  plugin->msg_ref->das_update_info(&tObj, objecter_op);
++  objecter_op->put();
++  std::lock_guard l(reg->lock);
++  reg->remove("global_cache", "client_adaptor_plugin");
++  return;
++}
++
++extern void das_req_prefetch(DasKvParam *params);
++TEST_P(ClientAdaptorTest, DasPushTest)
++{
++
++  PluginRegistry *reg = g_ceph_context->get_plugin_registry();
++  ASSERT_TRUE(reg);
++  auto plugin = dynamic_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
++  ASSERT_TRUE(plugin);
++  ClientAdaptorCcmMock* ccm_mock = new ClientAdaptorCcmMock();
++  ClientAdaptorMgr* mgr = plugin->msg_ref->get_mgr();
++
++  std::cout << "Client Adaptor: Before DI Mgr subclass is " << mgr->name() << std::endl;
++  plugin->msg_ref->set_mgr(ccm_mock);
++  mgr = plugin->msg_ref->get_mgr();
++  string obj_name = "rbd_data.135421846e0f.0000000000000056";
++  Objecter tObj(g_ceph_context, NULL, NULL, NULL, 0, 0);
++  DasKvParam *params = reinterpret_cast<DasKvParam*>(new char[sizeof(DasKvParam) + 22 + 1]);
++  params->offset = 2048;
++  params->len = 4194512;
++  params->opcode = 0;
++  params->timeStamp = ceph_clock_now().to_nsec();
++  params->cephPoolId = 2;
++  params->algType = DAS_ALG_SEQ;
++  params->objId = 3;
++  params->imageIdLen = 22;
++  memcpy(params->imageIdBuf, obj_name.c_str(), params->imageIdLen);
++  params->handle = plugin->msg_ref;
++  params->ctx = reinterpret_cast<Objecter *>(&tObj);
++  das_req_prefetch(params);
++  std::lock_guard l(reg->lock);
++  reg->remove("global_cache", "client_adaptor_plugin");
++  delete ccm_mock;
++  return;
++}
++TEST_P(ClientAdaptorTest, DasExitPushTest)
++{
++
++  PluginRegistry *reg = g_ceph_context->get_plugin_registry();
++  ASSERT_TRUE(reg);
++  auto plugin = dynamic_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
++  ASSERT_TRUE(plugin);
++
++  string obj_name = "rbd_data.135421846e0f.0000000000000056";
++  Objecter tObj(g_ceph_context, NULL, NULL, NULL, 0, 0);
++  DasKvParam *params = reinterpret_cast<DasKvParam*>(new char[sizeof(DasKvParam) + 22 + 1]);
++  params->offset = 2048;
++  params->len = 4194512;
++  params->opcode = 0;
++  params->timeStamp = ceph_clock_now().to_nsec();
++  params->cephPoolId = 2;
++  params->algType = DAS_ALG_SEQ;
++  params->objId = 3;
++  params->imageIdLen = 22;
++  memcpy(params->imageIdBuf, obj_name.c_str(), params->imageIdLen);
++  params->handle = plugin->msg_ref;
++  params->ctx = reinterpret_cast<Objecter *>(&tObj);
++  das_req_prefetch(params);
++  std::lock_guard l(reg->lock);
++  reg->remove("global_cache", "client_adaptor_plugin");
++  das_req_prefetch(params);
++  return;
++}
++
++TEST_P(ClientAdaptorTest, MgrInitTest)
++{
++
++  PluginRegistry *reg = g_ceph_context->get_plugin_registry();
++  ASSERT_TRUE(reg);
++  auto plugin = dynamic_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
++  ASSERT_TRUE(plugin);
++  ClientAdaptorCcmMock* ccm_mock = new ClientAdaptorCcmMock();
++  ClientAdaptorMgr* mgr = plugin->msg_ref->get_mgr();
++  std::cout << "Client Adaptor: Before DI Mgr subclass is " << mgr->name() << std::endl;
++  plugin->msg_ref->set_mgr(ccm_mock);
++  mgr = plugin->msg_ref->get_mgr();
++  int32_t res = mgr->init_mgr();
++  bool init_flag = (res==0?true:false);
++  mgr->set_init_flag(init_flag);
++  bool is_succeed = mgr->is_init_succeed();
++  std::cout << "Mgr init result: " << is_succeed << std::endl;
++  std::lock_guard l(reg->lock);
++  reg->remove("global_cache", "client_adaptor_plugin");
++  delete ccm_mock;
++  return;
++}
++
++TEST_P(ClientAdaptorTest, MgrInfoTest)
++{
++
++  PluginRegistry *reg = g_ceph_context->get_plugin_registry();
++  ASSERT_TRUE(reg);
++  auto plugin = dynamic_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
++  ASSERT_TRUE(plugin);
++
++  uint32_t num = 0;
++
++
++  string obj_name = "rbd_data.135421846e0f.0000000000000056";
++  uint64_t pool_id = 3;
++  uint32_t pt_index;
++
++  plugin->msg_ref->get_node_id(obj_name, pool_id, pt_index);
++  PTViewPtEntry *entry = new PTViewPtEntry();
++  NodeInfo *node_info = new NodeInfo();
++  strcpy(node_info->ipv4AddrStr, "192.168.200.2");
++  node_info->ports[0] = 68;
++  node_info->portNum = 1;
++  plugin->mgr_ref->get_pt_num(num);
++  plugin->mgr_ref->get_pt_entry(pt_index, entry);
++
++
++  delete node_info;
++  delete entry;
++  std::lock_guard l(reg->lock);
++  reg->remove("global_cache", "client_adaptor_plugin");
++}
++
++TEST_P(ClientAdaptorTest, MgrInitTest123)
++{
++
++  PluginRegistry *reg = g_ceph_context->get_plugin_registry();
++  ASSERT_TRUE(reg);
++  auto plugin = dynamic_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
++  ASSERT_TRUE(plugin);
++  ClientAdaptorCcm* ccm = new ClientAdaptorCcm();
++
++
++
++
++  string obj_name = "rbd_data.135421846e0f.0000000000000056";
++  uint32_t num = 0;
++  uint64_t pool_id = 3;
++  uint32_t pt_index;
++  uint32_t node_id = 2;
++  plugin->msg_ref->get_node_id(obj_name, pool_id, pt_index);
++  PTViewPtEntry *entry = new PTViewPtEntry();
++  NodeInfo *node_info = new NodeInfo();
++  int32_t res = ccm->init_mgr();
++  int32_t res1 = ccm->get_pt_num(num);
++  int32_t res2 = ccm->get_pt_entry(pt_index,entry);
++  int32_t res3 = ccm->get_node_info(node_id,node_info);
++
++  std::cout << "Mgr init result: " << res << std::endl;
++  std::cout << "Mgr init result: " << res1 << std::endl;
++  std::cout << "Mgr init result: " << res2 << std::endl;
++  std::cout << "Mgr init result: " << res3 << std::endl;
++  delete node_info;
++  delete entry;
++  std::lock_guard l(reg->lock);
++  reg->remove("global_cache", "client_adaptor_plugin");
++  delete ccm;
++  return;
++}
++
++
++INSTANTIATE_TEST_CASE_P(
++  ClientAdaptor,
++  ClientAdaptorTest,
++  ::testing::Values("client-adaptor")
++);  
+diff --git a/src/test/ServerAdaptorSimulate/CMakeLists.txt b/src/test/ServerAdaptorSimulate/CMakeLists.txt
+new file mode 100644
+index 00000000..d73e253c
+--- /dev/null
++++ b/src/test/ServerAdaptorSimulate/CMakeLists.txt
+@@ -0,0 +1,9 @@
++add_executable(global_cache_server
++  global_cache_server.cc
++  global_cache_dispatcher.cc
++  )
++target_link_libraries(global_cache_server
++   global ceph-common
++   ${EXTRALIBS} 
++   ${CMAKE_DL_LIBS} 
++)
+diff --git a/src/test/ServerAdaptorSimulate/global_cache_dispatcher.cc b/src/test/ServerAdaptorSimulate/global_cache_dispatcher.cc
+new file mode 100644
+index 00000000..9930a495
+--- /dev/null
++++ b/src/test/ServerAdaptorSimulate/global_cache_dispatcher.cc
+@@ -0,0 +1,150 @@
++#include <string>
++#include <iostream>
++#include <iomanip>
++
++#include "include/compat.h"
++#include "global_cache_dispatcher.h"
++#include "messages/MPing.h"
++#include "messages/MDataPing.h"
++#include "messages/MOSDOpReply.h"
++#include "messages/MOSDOp.h"
++
++using namespace std;
++
++GlobalCacheDispatcher::GlobalCacheDispatcher(Messenger *msgr, int32_t rval, int32_t result):
++    Dispatcher(msgr->cct),
++    active(false),
++    messenger(msgr),
++    dcount(0),
++    rval(rval),
++    result(result)
++{
++    out_data = std::make_unique<string>(8192, 'c');
++}
++
++GlobalCacheDispatcher::~GlobalCacheDispatcher() {
++    // nothing
++}
++
++bool GlobalCacheDispatcher::ms_dispatch(Message *m)
++{
++    uint64_t dc = 0;
++
++    dc = dcount++;
++
++    ConnectionRef con = m->get_connection();
++    Messenger* msgr = con->get_messenger();
++
++    switch (m->get_type()) {
++        case CEPH_MSG_PING:
++	{
++	    cout << "Client Adaptor: " << __func__ << " msg ping " << std::endl;
++	    cout << "Client Adaptor: " << __func__ << "connection = " << con << "peer_addr = "
++		 << con->get_peer_addr() << std::endl;
++	    break;
++	}
++	case MSG_DATA_PING:
++	{
++	    MDataPing* mdp __attribute__((unused)) = static_cast<MDataPing*>(m);
++	    cout << "Client Adaptor: " << __func__ << "msg data ping" << std::endl;
++	    ConnectionRef con = m->get_connection();
++	    con->send_message(m);
++	}
++	break;
++	case CEPH_MSG_OSD_OP:
++	{
++	    cout << "Client Adaptor: " << __func__ << " osd op msg" << std::endl;
++	    cout << "Client Adaptor: " << __func__ << "connection = " << con << std::endl;
++	    cout << "Client Adaptor: " << __func__ << "peer_addr = " << con->get_peer_addr() << std::endl;
++	    MOSDOp *mosd_op = static_cast<MOSDOp *>(m);
++	    mosd_op->finish_decode();
++	    cout << "Client Adaptor: " << __func__ << " MOSDOp " << *mosd_op << std::endl;
++	    cout << "Client Adaptor: " << __func__ << " pool id = " << mosd_op->get_pg().pool() << std::endl;
++	    cout << "Client Adaptor: " << __func__ << " pt id = " << mosd_op->get_pg().m_seed << std::endl;
++
++	    uint32_t index = 0;
++	    vector<OSDOp> &ops = mosd_op->ops;
++	    for (vector<OSDOp>::iterator op = ops.begin(); op != ops.end();index++, ++op) {
++	        cout << "Client Adaptor: " << __func__ << "index = " << index
++		     << " op-code = 0x" << hex << op->op.op << std::endl;
++		string cname, mname;
++		switch (op->op.op) {
++		    case CEPH_OSD_OP_READ:
++		    case CEPH_OSD_OP_SYNC_READ:
++		    case CEPH_OSD_OP_SPARSE_READ: {
++		        cout << "Client Adaptor: " << __func__ << " offset = 0x" << hex << op->op.extent.offset
++			     << "length = 0x" << hex << op->op.extent.length << std::endl;
++			if (unlikely(op->op.op == CEPH_OSD_OP_SPARSE_READ)) {
++			    std::map<uint64_t, uint64_t> extents;
++			    extents[op->op.extent.offset] = op->op.extent.length;
++			    encode(extents, op->outdata);
++			    encode(std::string_view(out_data->c_str(), op->op.extent.length), op->outdata);
++			} else {
++			    string error;
++			    cout << "Client Adaptor: " << __func__ << "read op" << std::endl;
++			    cout << "Client Adaptor: " << __func__ << "before length = 0x" << hex << op->outdata.length() << std::endl;
++			    op->outdata.read_file("/home/z00473871/ceph/ceph-14.2.8-global/build/writefile.txt", &error);
++			    cout << "Client Adaptor: " << __func__ << " after length = 0x" << hex << op->outdata.length() << std::endl;
++			}
++			op->rval = rval;
++			cout << "Client Adaptor: " << __func__ << " op rval " << op->rval << std::endl;
++		    break;}
++		case CEPH_OSD_OP_WRITE:
++		case CEPH_OSD_OP_WRITEFULL: {
++		    cout << "Client Adaptor: " << __func__ << "offset = 0x" << hex << op->op.extent.offset
++				<< "length = 0x" << hex << op->op.extent.length << std::endl;
++		    op->indata.writefile("/home/z00473871/ceph/ceph-14.2.8-global/build/writefile.txt");
++
++		    op->rval = rval;
++		    cout << "Client Adaptor: " << __func__ << " op rval " << op->rval << std::endl;
++		    break;}
++		case CEPH_OSD_OP_CALL:{
++		    auto bp = op->indata.cbegin();
++		    bp.copy(op->op.cls.class_len, cname);
++		    bp.copy(op->op.cls.method_len, mname);
++		    cout << "Client Adaptor: " << __func__ << " op call class: " << cname << " method: " << mname << std::endl;
++		    break;}
++		case CEPH_OSD_OP_STAT: {
++		    uint64_t psize = 0x400000;
++		    time_t ptime = 0;
++		    encode(psize, op->outdata);
++		    encode(ptime, op->outdata);
++		    break;}
++		default:
++		    break;
++		}
++	    }
++	    MOSDOpReply *reply = new MOSDOpReply(mosd_op, 0, 0, CEPH_OSD_FLAG_ACK|CEPH_OSD_FLAG_ONDISK, false);
++	    reply->claim_op_out_data(mosd_op->ops);
++	    reply->set_result(result);
++	    cout << "Client Adaptor: " << __func__ << "Return result " << reply->get_result() << std::endl;
++	    cout << "Client Adaptor: " << __func__ << "Retry time " << mosd_op->get_retry_attempt() << std::endl;
++	    cout << "Client Adaptor: " << __func__ << " MOSDOpReply " << *reply << std::endl;
++	    mosd_op->get_connection()->send_message(reply);
++	    mosd_op->put();
++	    break;
++	}
++	default:
++	    ceph_abort();
++    }
++
++    if (unlikely(msgr->get_magic() & MSG_MAGIC_TRACE_CTR)) {
++        if (unlikely(dc % 65536) == 0) {
++	    struct timespec ts;
++	    clock_gettime(CLOCK_REALTIME_COARSE, &ts);
++	    cout << "Client Adaptor: " << __func__ << " ping " << dc << "nanos: " <<
++		    ts.tv_nsec + (ts.tv_sec * 1000000000) << std::endl;
++	}
++    }
++
++    return true;
++}
++
++bool GlobalCacheDispatcher::ms_handle_reset(Connection *con)
++{
++    return true;
++}
++
++void GlobalCacheDispatcher::ms_handle_remote_reset(Connection *con)
++{
++    // nothing
++}
++
+diff --git a/src/test/ServerAdaptorSimulate/global_cache_dispatcher.h b/src/test/ServerAdaptorSimulate/global_cache_dispatcher.h
+new file mode 100644
+index 00000000..b2ce4390
+--- /dev/null
++++ b/src/test/ServerAdaptorSimulate/global_cache_dispatcher.h
+@@ -0,0 +1,108 @@
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++#ifndef GLOBAL_CACHE_DISPATCHER_H_
++#define GLOBAL_CACHE_DISPATCHER_H_
++
++#include "msg/Dispatcher.h"
++#include "msg/Messenger.h"
++
++class GlobalCacheDispatcher: public Dispatcher {
++private:
++  bool active;
++  Messenger *messenger;
++  uint64_t dcount;
++  int32_t rval;
++  int32_t result;
++  unique_ptr<string> out_data;
++
++public:
++  GlobalCacheDispatcher(Messenger *msgr, int32_t rval, int32_t result);
++  ~GlobalCacheDispatcher() override;
++  uint64_t get_dcount() { return dcount; }
++
++  void set_active() {
++    active = true;
++  };
++
++
++  bool ms_dispatch(Message *m) override;
++
++
++
++
++
++
++
++
++  void ms_handle_connect(Connection *con) override { };
++
++
++
++
++
++
++  void ms_handle_accept(Connection *con) override { };
++
++
++
++
++
++
++
++
++
++
++
++  bool ms_handle_reset(Connection *con) override;
++
++
++
++
++
++
++
++
++
++
++  void ms_handle_remote_reset(Connection *con) override;
++
++  bool ms_handle_refused(Connection *con) override { return false; }
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++  
++  bool ms_get_authorizer(int dest_type, AuthAuthorizer **a) override {
++    return false;
++  };
++
++  int ms_handle_authentication(Connection *con) override {
++    return 1;
++  }
++};
++
++#endif
++
+diff --git a/src/test/ServerAdaptorSimulate/global_cache_server.cc b/src/test/ServerAdaptorSimulate/global_cache_server.cc
+new file mode 100644
+index 00000000..e01a13a0
+--- /dev/null
++++ b/src/test/ServerAdaptorSimulate/global_cache_server.cc
+@@ -0,0 +1,131 @@
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++#include <sys/types.h>
++
++#include <iostream>
++#include <string>
++
++using namespace std;
++
++#include "common/config.h"
++#include "msg/Messenger.h"
++#include "common/Timer.h"
++#include "common/ceph_argparse.h"
++#include "global/global_init.h"
++#include "global/signal_handler.h"
++#include "perfglue/heap_profiler.h"
++#include "common/address_helper.h"
++#include "global_cache_dispatcher.h"
++#include "auth/DummyAuth.h"
++#include "msg/async/AsyncMessenger.h"
++
++#define dout_subsys ceph_subsys_global_cache
++
++void usage(ostream& out)
++{
++  out << "usage: global_cache_server [options]\n"
++    "options:\n"
++    "--rval -ErrorCode\n"
++        "--result -ErrorCode\n"
++	;
++}
++
++int main(int argc, const char **argv)
++{
++    vector<const char*> args;
++    Messenger *messenger;
++    Dispatcher *dispatcher;
++    vector<const char*>::iterator arg_iter;
++    string val;
++    int32_t rval = 0;
++    int32_t result = 0;
++    entity_addr_t bind_addr; 
++
++    string addr = "localhost";
++    string port = "1234";
++
++    cout << "Client Adaptor: " << __func__ << " Global Cache Server starting..." << std::endl;
++
++    argv_to_vec(argc, argv, args);
++
++    auto cct = global_init(NULL, args, CEPH_ENTITY_TYPE_ANY,
++		    CODE_ENVIRONMENT_DAEMON,
++		    CINIT_FLAG_NO_DEFAULT_CONFIG_FILE);
++
++    for (arg_iter = args.begin(); arg_iter != args.end();) {
++      if (ceph_argparse_witharg(args, arg_iter, &val, "--rval", (char*) NULL)){
++        rval = atoi(val.c_str());
++      } else if (ceph_argparse_witharg(args, arg_iter, &val, "--result", (char*) NULL)){
++        result = atoi(val.c_str());
++      } else {
++      ++arg_iter;
++      }
++    };
++
++    if (!args.empty()) {
++      cerr << "What is this? -- " << args[0] << std::endl;
++      usage(cerr);
++      exit(1);
++    }
++
++    string dest_str = "tcp://";
++    dest_str += addr;
++    dest_str += ":";
++    dest_str += port;
++    entity_addr_from_url(&bind_addr, dest_str.c_str());
++  entity_addrvec_t bind_addrs(bind_addr);
++
++  string ms_type = g_conf().get_val<std::string>("ms_type");
++  cout << "Client Adaptor: " << __func__ << " ms_type: " << ms_type << std::endl;
++    messenger = Messenger::create(g_ceph_context, ms_type,
++		    entity_name_t::OSD(-1),
++		    "global_cache_server",
++		    0 /* nonce */,
++		    0 /* flags */);
++
++    DummyAuthClientServer dummy_auth(g_ceph_context);
++  dummy_auth.auth_registry.refresh_config();
++  messenger->set_auth_client(&dummy_auth);
++    messenger->set_auth_server(&dummy_auth);
++    messenger->set_magic(MSG_MAGIC_TRACE_CTR);
++    messenger->set_default_policy(Messenger::Policy::stateless_server(0));
++
++
++  bind_addr.set_type(entity_addr_t::TYPE_MSGR2);
++    int32_t r = messenger->bind(bind_addr);
++    if(r < 0)
++       goto out;
++
++
++
++    common_init_finish(g_ceph_context);
++
++    dispatcher = new GlobalCacheDispatcher(messenger, rval, result);
++    dispatcher->ms_set_require_authorizer(false);
++
++    messenger->add_dispatcher_head(dispatcher);
++    messenger->start();
++
++  cout << "Client Adaptor: " << __func__ << " server conn = "
++	    << static_cast<AsyncMessenger *>(messenger)->lookup_conn(bind_addrs) << std::endl;
++    messenger->wait();
++
++
++    delete messenger;
++
++out:
++    cout << "Client Adaptor: " << __func__ << " Simple Server exit" << std::endl;
++    return r;
++}
+diff --git a/src/test/librbd/io/test_mock_ImageRequestWQ.cc b/src/test/librbd/io/test_mock_ImageRequestWQ.cc
+index 50daa83c..209740a8 100644
+--- a/src/test/librbd/io/test_mock_ImageRequestWQ.cc
++++ b/src/test/librbd/io/test_mock_ImageRequestWQ.cc
+@@ -58,6 +58,11 @@ struct ImageDispatchSpec<librbd::MockTestImageCtx> {
+     return s_instance;
+   }
+ 
++#ifdef WITH_GLOBAL_CACHE
++  AioCompletion* get_completion() {
++    return aio_comp;
++  }
++#endif
+   MOCK_CONST_METHOD0(is_write_op, bool());
+   MOCK_CONST_METHOD0(start_op, void());
+   MOCK_CONST_METHOD0(send, void());
+diff --git a/src/test/messenger/simple_client.cc b/src/test/messenger/simple_client.cc
+index ba7ed2b0..91f903c9 100644
+--- a/src/test/messenger/simple_client.cc
++++ b/src/test/messenger/simple_client.cc
+@@ -30,6 +30,7 @@ using namespace std;
+ #include "common/address_helper.h"
+ #include "message_helper.h"
+ #include "simple_dispatcher.h"
++#include "auth/DummyAuth.h"
+ 
+ #define dout_subsys ceph_subsys_simple_client
+ 
+@@ -59,7 +60,7 @@ int main(int argc, const char **argv)
+ 	std::string addr = "localhost";
+ 	std::string port = "1234";
+ 
+-	int n_msgs = 50;
++	int n_msgs = 1;
+ 	int n_dsize = 0;
+ 
+ 	struct timespec ts;
+@@ -101,12 +102,21 @@ int main(int argc, const char **argv)
+ 	  "dest port " << port << " " <<
+ 	  "initial msgs (pipe depth) " << n_msgs << " " <<
+ 	  "data buffer size " << n_dsize << std::endl;
+-
+-	messenger = Messenger::create(g_ceph_context, g_conf().get_val<std::string>("ms_type"),
+- 				      entity_name_t::MON(-1),
++             g_ceph_context->_conf.set_val("auth_cluster_required", "none");
++             g_ceph_context->_conf.set_val("auth_service_required", "none");
++             g_ceph_context->_conf.set_val("auth_client_required", "none");
++	     string ms_type = g_conf().get_val<std::string>("ms_type");
++	     cout << "Client Adaptor: ms_type: " << ms_type << std::endl;
++	messenger = Messenger::create(g_ceph_context, ms_type,
++ 				      entity_name_t::CLIENT(-1),
+ 				      "client",
+ 				      getpid(), 0);
+ 
++	DummyAuthClientServer dummy_auth(g_ceph_context);
++        	dummy_auth.auth_registry.refresh_config();
++	messenger->set_auth_client(&dummy_auth);
++		messenger->set_auth_server(&dummy_auth);
++
+ 	// enable timing prints
+ 	messenger->set_magic(MSG_MAGIC_TRACE_CTR);
+ 	messenger->set_default_policy(Messenger::Policy::lossy_client(0));
+@@ -115,10 +125,16 @@ int main(int argc, const char **argv)
+ 	dest_str += addr;
+ 	dest_str += ":";
+ 	dest_str += port;
++		cout << "Client Adaptor: address = " << dest_str << std::endl;
+ 	entity_addr_from_url(&dest_addr, dest_str.c_str());
++	//dest_addr.set_type(entity_addr_t::TYPE_LEGACY);
++	dest_addr.set_type(entity_addr_t::TYPE_MSGR2);
++		cout << "Client Adaptor: legacy address = " << dest_addr.get_legacy_str() << std::endl;
+ 	entity_addrvec_t dest_addrs(dest_addr);
++		cout << "Client Adaptor: vec legacy address = " << dest_addrs.get_legacy_str() << std::endl;
+ 
+ 	dispatcher = new SimpleDispatcher(messenger);
++	dispatcher->ms_set_require_authorizer(false);
+ 	messenger->add_dispatcher_head(dispatcher);
+ 
+ 	dispatcher->set_active(); // this side is the pinger
+@@ -127,7 +143,12 @@ int main(int argc, const char **argv)
+ 	if (r < 0)
+ 		goto out;
+ 
+-	conn = messenger->connect_to_mon(dest_addrs);
++	conn = messenger->connect_to_osd(dest_addrs);
++		std::cout << "Client Adaptor: conn = " << conn << std::endl;
++
++		while (!conn->is_connected()) {
++			nanosleep(&ts, NULL);
++		}
+ 
+ 	// do stuff
+ 	time_t t1, t2;
+@@ -144,6 +165,12 @@ int main(int argc, const char **argv)
+ 	    m = new_simple_ping_with_data("simple_client", n_dsize);
+ 	  }
+ 	  conn->send_message(m);
++		std::cout << "Client Adaptor: client message conn = " << m->get_connection() << std::endl;
++		std::cout << "Client Adaptor: peer_addr = " << conn->get_peer_addr() << std::endl;
++		entity_addrvec_t peer_addr_vec = *(m->get_connection()->peer_addrs);
++		for (auto it : peer_addr_vec.v) {
++			std::cout << "Client Adaptor: peer_addr = " << it.get_legacy_str() << std::endl;
++		}	
+ 	}
+ 
+ 	// do stuff
+diff --git a/src/test/messenger/simple_dispatcher.cc b/src/test/messenger/simple_dispatcher.cc
+index b13958d3..555cd339 100644
+--- a/src/test/messenger/simple_dispatcher.cc
++++ b/src/test/messenger/simple_dispatcher.cc
+@@ -17,6 +17,8 @@
+ #include "simple_dispatcher.h"
+ #include "messages/MPing.h"
+ #include "messages/MDataPing.h"
++#include "messages/MOSDOpReply.h"
++#include "messages/MOSDOp.h"
+ 
+ SimpleDispatcher::SimpleDispatcher(Messenger *msgr) :
+   Dispatcher(msgr->cct),
+@@ -42,16 +44,37 @@ bool SimpleDispatcher::ms_dispatch(Message *m)
+ 
+   switch (m->get_type()) {
+   case CEPH_MSG_PING:
++  {
++    std::cout << "Client Adaptor: msg ping " << std::endl;  
++    std::cout << "Client Adaptor: conn =  " << con << "peer_addr = " << con->get_peer_addr() <<  std::endl;  
++
++
++
++
+     break;
++  }
+   case MSG_DATA_PING:
+   {
+     MDataPing* mdp __attribute__((unused)) = static_cast<MDataPing*>(m);
++    std::cout << "Client Adaptor: msg data ping " << std::endl;  
+     //cout << "MDataPing " << mdp->tag << " " << mdp->counter << std::endl;
+     //mdp->get_data().hexdump(cout);
+     ConnectionRef con = m->get_connection();
+     con->send_message(m);
+   }
+     break;
++  case CEPH_MSG_OSD_OP:
++  {
++    std::cout << "Client Adaptor: osd op msg " << std::endl;  
++    std::cout << "Client Adaptor: conn = " << con << std::endl;  
++    std::cout << "Client Adaptor: peer_addr = " << con->get_peer_addr() << std::endl;  
++    MOSDOp *osd_op = static_cast<MOSDOp*>(m);
++    MOSDOpReply *reply = new MOSDOpReply(osd_op, 0, 0, 0, false);
++    std::cout << "Client Adaptor: connection " << m->get_connection() << std::endl;  
++     m->get_connection()->send_message(reply);
++     m->put();
++     break;
++   }
+   default:
+     ceph_abort();
+   }
+@@ -66,7 +89,7 @@ bool SimpleDispatcher::ms_dispatch(Message *m)
+   } /* trace ctr */
+ 
+ 
+-  con->send_message(m);
++  //con->send_message(m);
+ 
+   //m->put();
+ 
+diff --git a/src/test/messenger/simple_server.cc b/src/test/messenger/simple_server.cc
+index 8b85f3af..0622849c 100644
+--- a/src/test/messenger/simple_server.cc
++++ b/src/test/messenger/simple_server.cc
+@@ -28,6 +28,8 @@ using namespace std;
+ #include "perfglue/heap_profiler.h"
+ #include "common/address_helper.h"
+ #include "simple_dispatcher.h"
++#include "auth/DummyAuth.h"
++#include "msg/async/AsyncMessenger.h"
+ 
+ #define dout_subsys ceph_subsys_simple_server
+ 
+@@ -72,17 +74,26 @@ int main(int argc, const char **argv)
+ 	dest_str += ":";
+ 	dest_str += port;
+ 	entity_addr_from_url(&bind_addr, dest_str.c_str());
++		entity_addrvec_t bind_addrs(bind_addr);
+ 
+-	messenger = Messenger::create(g_ceph_context, g_conf().get_val<std::string>("ms_type"),
+-				      entity_name_t::MON(-1),
++		string ms_type = g_conf().get_val<std::string>("ms_type");
++		cout << "Client Adaptor: ms_type: " << ms_type << std::endl;
++	messenger = Messenger::create(g_ceph_context, ms_type,
++				      entity_name_t::OSD(-1),
+ 				      "simple_server",
+ 				      0 /* nonce */,
+ 				      0 /* flags */);
+ 	// enable timing prints
++	DummyAuthClientServer dummy_auth(g_ceph_context);
++        	dummy_auth.auth_registry.refresh_config();
++		messenger->set_auth_client(&dummy_auth);
++	messenger->set_auth_server(&dummy_auth);
+ 	messenger->set_magic(MSG_MAGIC_TRACE_CTR);
+ 	messenger->set_default_policy(
+ 	  Messenger::Policy::stateless_server(0));
+ 
++
++		bind_addr.set_type(entity_addr_t::TYPE_MSGR2);
+ 	r = messenger->bind(bind_addr);
+ 	if (r < 0)
+ 		goto out;
+@@ -92,9 +103,12 @@ int main(int argc, const char **argv)
+ 	common_init_finish(g_ceph_context);
+ 
+ 	dispatcher = new SimpleDispatcher(messenger);
++	dispatcher->ms_set_require_authorizer(false);
+ 
+ 	messenger->add_dispatcher_head(dispatcher); // should reach ready()
+ 	messenger->start();
++
++	std::cout << "Client Adaptor: server conn = " << static_cast<AsyncMessenger *>(messenger)->lookup_conn(bind_addrs) << std::endl;
+ 	messenger->wait(); // can't be called until ready()
+ 
+ 	// done
+diff --git a/src/vstart.sh b/src/vstart.sh
+index 37aa28b7..a146de36 100755
+--- a/src/vstart.sh
++++ b/src/vstart.sh
+@@ -752,6 +752,8 @@ EOF
+             local uuid=`uuidgen`
+             echo "add osd$osd $uuid"
+ 	    OSD_SECRET=$($CEPH_BIN/ceph-authtool --gen-print-key)
++
++	    OSD_SECRET=`echo ${OSD_SECRET} | awk '{print $NF}'`
+ 	    echo "{\"cephx_secret\": \"$OSD_SECRET\"}" > $CEPH_DEV_DIR/osd$osd/new.json
+             ceph_adm osd new $uuid -i $CEPH_DEV_DIR/osd$osd/new.json
+ 	    rm $CEPH_DEV_DIR/osd$osd/new.json
+-- 
+2.23.0
+
