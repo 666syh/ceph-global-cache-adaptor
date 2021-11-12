@@ -167,7 +167,7 @@ index 00000000..e0b5b3dd
 +    return 0;
 +}
 +
-+int32_t ClientAdaptorCcm::get_pt_entry(uint32_t pt_index, PTViewptEntry* entry){
++int32_t ClientAdaptorCcm::get_pt_entry(uint32_t pt_index, PTViewPtEntry* entry){
 +
 +
 +    if (GetPtEntry(pt_index,entry)){
@@ -2141,7 +2141,7 @@ index 00000000..1fbb82d0
 +		case CEPH_OSD_OP_WRITEFULL: {
 +		    cout << "Client Adaptor: " << __func__ << "offset = 0x" << hex << op->op.extent.offset
 +				<< "length = 0x" << hex << op->op.extent.length << std::endl;
-+		    op->indata.writefile("/home/z00473871/ceph/ceph-14.2.8-global/build/writefile.txt");
++		    op->indata.write_file("/home/ceph-14.2.8/build/writefile.txt");
 +
 +		    op->rval = rval;
 +		    cout << "Client Adaptor: " << __func__ << " op rval " << op->rval << std::endl;
