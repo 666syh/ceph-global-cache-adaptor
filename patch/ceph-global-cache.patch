@@ -2131,7 +2131,7 @@ index 00000000..1fbb82d0
 +			    string error;
 +			    cout << "Client Adaptor: " << __func__ << "read op" << std::endl;
 +			    cout << "Client Adaptor: " << __func__ << "before length = 0x" << hex << op->outdata.length() << std::endl;
-+			    op->outdata.read_file("/home/z00473871/ceph/ceph-14.2.8-global/build/writefile.txt", &error);
++			    op->outdata.read_file("/home/ceph-14.2.8/build/writefile.txt", &error);
 +			    cout << "Client Adaptor: " << __func__ << " after length = 0x" << hex << op->outdata.length() << std::endl;
 +			}
 +			op->rval = rval;
