@@ -388,7 +388,7 @@ index 00000000..0f50787a
 +
 +int32_t ClientAdaptorMsg::get_node_id(string obj_name, int64_t pool_id, uint32_t& pt_id){
 +  if (obj_name.length() == 0 || pool_id < 0){
-+    std:cout << __func__ << " Client Adaptor: input parameter invalid!" << std::endl;
++    std::cout << __func__ << " Client Adaptor: input parameter invalid!" << std::endl;
 +    return -1;
 +  }
 +
