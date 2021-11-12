@@ -2195,7 +2195,7 @@ index 00000000..1fbb82d0
 +
 +void GlobalCacheDispatcher::ms_handle_remote_reset(Connection *con)
 +{
-+    // nothing
++}    // nothing
 diff --git a/src/test/ServerAdaptorSimulate/global_cache_dispatcher.h b/src/test/ServerAdaptorSimulate/global_cache_dispatcher.h
 new file mode 100644
 index 00000000..b2ce4390
