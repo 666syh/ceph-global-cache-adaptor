@@ -1,76 +1,20 @@
-From 6b7209a53c3d118d8fc0b398cf7f68b0a83d9b5a Mon Sep 17 00:00:00 2001
-From: wangzengliang <root@taishan200-2280-2s48p-256g--a60.compass-ci.net>
-Date: Thu, 4 Nov 2021 15:44:48 +0800
-Subject: [PATCH] fix bug
-
----
- src/CMakeLists.txt                            |  17 +
- src/client_adaptor/CMakeLists.txt             |  17 +
- src/client_adaptor/ClientAdaptorMgr.cc        |  64 +++
- src/client_adaptor/ClientAdaptorMgr.h         |  91 ++++
- src/client_adaptor/ClientAdaptorMsg.cc        | 281 +++++++++++++
- src/client_adaptor/ClientAdaptorMsg.h         |  72 ++++
- src/client_adaptor/ClientAdaptorPerf.cc       |  83 ++++
- src/client_adaptor/ClientAdaptorPerf.h        |  50 +++
- src/client_adaptor/ClientAdaptorPlugin.cc     |  39 ++
- src/client_adaptor/ClientAdaptorPlugin.h      |  33 ++
- src/common/options.cc                         |  27 +-
- src/include/config-h.in.cmake                 |   3 +
- src/librbd/ImageCtx.cc                        |  12 +
- src/librbd/Types.h                            |   8 +
- src/librbd/io/ImageDispatchSpec.h             |   6 +-
- src/librbd/io/ImageRequestWQ.cc               |  26 +-
- src/msg/Message.cc                            |   6 +-
- src/osdc/Objecter.cc                          | 390 +++++++++++++++++-
- src/osdc/Objecter.h                           |   8 +-
- src/test/CMakeLists.txt                       |   7 +
- src/test/ClientAdaptorTest/CMakeLists.txt     |  11 +
- .../ClientAdaptorTest/ClientAdaptorTest.cc    | 370 +++++++++++++++++
- src/test/ServerAdaptorSimulate/CMakeLists.txt |   9 +
- .../global_cache_dispatcher.cc                | 150 +++++++
- .../global_cache_dispatcher.h                 | 108 +++++
- .../global_cache_server.cc                    | 131 ++++++
- .../librbd/io/test_mock_ImageRequestWQ.cc     |   5 +
- src/test/messenger/simple_client.cc           |  37 +-
- src/test/messenger/simple_dispatcher.cc       |  25 +-
- src/test/messenger/simple_server.cc           |  18 +-
- src/vstart.sh                                 |   2 +
- 31 files changed, 2085 insertions(+), 21 deletions(-)
- create mode 100644 src/client_adaptor/CMakeLists.txt
- create mode 100644 src/client_adaptor/ClientAdaptorMgr.cc
- create mode 100644 src/client_adaptor/ClientAdaptorMgr.h
- create mode 100644 src/client_adaptor/ClientAdaptorMsg.cc
- create mode 100644 src/client_adaptor/ClientAdaptorMsg.h
- create mode 100644 src/client_adaptor/ClientAdaptorPerf.cc
- create mode 100644 src/client_adaptor/ClientAdaptorPerf.h
- create mode 100644 src/client_adaptor/ClientAdaptorPlugin.cc
- create mode 100644 src/client_adaptor/ClientAdaptorPlugin.h
- create mode 100644 src/test/ClientAdaptorTest/CMakeLists.txt
- create mode 100644 src/test/ClientAdaptorTest/ClientAdaptorTest.cc
- create mode 100644 src/test/ServerAdaptorSimulate/CMakeLists.txt
- create mode 100644 src/test/ServerAdaptorSimulate/global_cache_dispatcher.cc
- create mode 100644 src/test/ServerAdaptorSimulate/global_cache_dispatcher.h
- create mode 100644 src/test/ServerAdaptorSimulate/global_cache_server.cc
-
 diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
-index 28ec9835..aaedd720 100644
+index 28ec9835f85..fb698f48ae7 100644
 --- a/src/CMakeLists.txt
 +++ b/src/CMakeLists.txt
-@@ -103,6 +103,13 @@ if(HAVE_INTEL)
+@@ -103,6 +103,11 @@ if(HAVE_INTEL)
      HAVE_BETTER_YASM_ELF64)
  endif()
  
 +if(WITH_GLOBAL_CACHE)
 +set(third_part_dir ${CMAKE_SOURCE_DIR}/../third_part)
 +message(STATUS "third part directory --> " ${third_part_dir})
-+include_directories(${third_part_dir}/inc)
 +link_directories(${third_part_dir}/lib)
-+#add_compile_definitions("CEPH_LIBDIR=${third_part_dir}")
 +endif()
  
  # require c++17
  if(CMAKE_VERSION VERSION_LESS "3.8")
-@@ -393,6 +400,10 @@ if(WITH_DPDK)
+@@ -393,6 +398,10 @@ if(WITH_DPDK)
    list(APPEND ceph_common_deps common_async_dpdk)
  endif()
  
@@ -81,11 +25,11 @@ index 28ec9835..aaedd720 100644
  add_library(common STATIC ${ceph_common_objs})
  target_link_libraries(common ${ceph_common_deps})
  
-@@ -560,6 +571,12 @@ add_subdirectory(dmclock)
+@@ -560,6 +569,12 @@ add_subdirectory(dmclock)
  
  add_subdirectory(compressor)
  
-+#Client adaptor
++# Client adaptor
 +if(WITH_GLOBAL_CACHE)
 +message(STATUS "Client adaptor cmake executing...")
 +add_subdirectory(client_adaptor)
@@ -96,7 +40,7 @@ index 28ec9835..aaedd720 100644
  if(WITH_TESTS)
 diff --git a/src/client_adaptor/CMakeLists.txt b/src/client_adaptor/CMakeLists.txt
 new file mode 100644
-index 00000000..17c30787
+index 00000000000..17c30787fc5
 --- /dev/null
 +++ b/src/client_adaptor/CMakeLists.txt
 @@ -0,0 +1,17 @@
@@ -119,13 +63,18 @@ index 00000000..17c30787
 +
 diff --git a/src/client_adaptor/ClientAdaptorMgr.cc b/src/client_adaptor/ClientAdaptorMgr.cc
 new file mode 100644
-index 00000000..e0b5b3dd
+index 00000000000..174e153c40c
 --- /dev/null
 +++ b/src/client_adaptor/ClientAdaptorMgr.cc
-@@ -0,0 +1,64 @@
-+#include "ClientAdaptorMgr.h"
+@@ -0,0 +1,123 @@
++/*
++*
++*
++*
++*/
 +
-+using namespace std;
++#include <iostream>
++#include "ClientAdaptorMgr.h"
 +
 +void ClientAdaptorMgr::set_init_flag(bool flag){
 +    init_flag = flag;
@@ -139,79 +88,145 @@ index 00000000..e0b5b3dd
 +        return false;
 +    }
 +}
++
++int32_t CcmPtChangeNotify(PTViewPtEntry *entry, uint32_t entryNum, void *ctx)
++{
++    if (entryNum == 0) {
++        return RET_OK;
++    }
++    std::vector<uint32_t> normal_pt;
++    for (uint32_t i = 0; i < entryNum; i++) {
++        if (entry[i].state == PTVIEW_PT_STATE_NORMAL) {
++            normal_pt.push_back(entry[i].ptId);
++        }
++    }
++    if (normal_pt.size() == 0) {
++        return RET_OK;
++    }
++    Objecter *obj = static_cast<Objecter*>(ctx);
++    obj->retry_op_submit(normal_pt);
++    return RET_OK;
++}
++
++void ClientAdaptorCcm::ccm_deregister(Objecter *obj)
++{
++    if (register_objs.count(obj) > 0) {
++        delete register_objs[obj];
++        register_objs.erase(obj);
++    }
++    if (register_objs.empty() && is_init_succeed()) {
++        set_init_flag(false);
++    }
++}
++
++bool ClientAdaptorCcm::ccm_callback_register(Objecter *obj)
++{
++    PTViewChangeOpHandle *ccmCallback = new PTViewChangeOpHandle();
++    register_objs[obj] = ccmCallback;
++    ccmCallback->notifyPtChange = CcmPtChangeNotify;
++    ccmCallback->ctx = (void *)obj;
++    if (OpenRegisterViewChangeNotifyChain(ccmCallback, CCM_MODULE_CLIENT)) {
++        std::cout << __func__ << " Client Adaptor: CCM agent register failed" << std::endl;
++        return false;
++    }
++    return true;
++}
++
 +/*
 + * Init manager .  failed to return -1
 +*/
-+int32_t ClientAdaptorCcm::init_mgr(){
++int32_t ClientAdaptorCcm::init_mgr(Objecter *obj){
 +    //Already init
 +    if (is_init_succeed()){
-+        return 0;
++        if (!ccm_callback_register(obj)) {
++            return RET_CCM_REGISTER_ERROR;
++        }
++        return RET_OK;
 +    }
-+    if (ConfParserInit()){
-+        cout << __func__ << " Client Adaptor: Config Parser init failed" << endl;
-+	return -1;
-+    }
-+
-+    if (AgentInit()){
-+        cout<< __func__<<" Client Adaptor: CCM agent init failed" << endl;
-+	return -1;
++    if (OpenAgentInit()){
++        std::cout << __func__ << " Client Adaptor: CCM agent init failed" << std::endl;
++	    return RET_CCM_AGENT_INIT_ERROR;
 +    }
 +
-+    return 0;
++    if (!ccm_callback_register(obj)){
++    	return RET_CCM_REGISTER_ERROR;
++    }
++
++    return RET_OK;
 +}
 +
 +int32_t ClientAdaptorCcm::get_pt_num(uint32_t& num){
-+
-+    num = GetTotalPtNum();
-+
-+    return 0;
++    num = OpenGetTotalPtNum();
++    return RET_OK;
 +}
 +
 +int32_t ClientAdaptorCcm::get_pt_entry(uint32_t pt_index, PTViewPtEntry* entry){
-+
-+
-+    if (GetPtEntry(pt_index,entry)){
-+        cout << __func__ << " Client Adaptor: Get PT entry failed" << endl;
-+	return -1;
++    if (OpenGetPtEntry(pt_index, entry)){
++        std::cout << __func__ << " Client Adaptor: Get PT entry failed" << std::endl;
++	    return RET_CCM_PT_ENTRY_ERROR;
 +    }
-+    return 0;
++    return RET_OK;
 +}
 +
 +int32_t ClientAdaptorCcm::get_node_info(uint32_t node_id, NodeInfo* node_info){
-+
-+
-+    if (AgentGetNodeInfo(node_id, node_info)){
-+        cout << __func__ << " Client Adaptor: Get node infomation failed" << endl;
-+        return -1;
++    if (OpenAgentGetNodeInfo(node_id, node_info)){
++        std::cout << __func__ << " Client Adaptor: Get node infomation failed" << std::endl;
++        return RET_CCM_NODE_INFO_ERROR;
 +    }
 +
-+    return 0;
++    return RET_OK;
++}
++
++bool ClientAdaptorCcm::get_pt_status(uint32_t pt_id) {
++    bool ret = true;
++    PTViewPtEntry pt_entry = { 0 };
++    if (get_pt_entry(pt_id, &pt_entry)) {
++        std::cout << __func__ << " Client Adaptor: Get PT entry failed" << std::endl;
++        return false;
++    }
++
++    if (pt_entry.state != PTVIEW_PT_STATE_NORMAL) {
++        return false;
++    }
++    return ret;
 +}
 diff --git a/src/client_adaptor/ClientAdaptorMgr.h b/src/client_adaptor/ClientAdaptorMgr.h
 new file mode 100644
-index 00000000..cc9b2d0e
+index 00000000000..35939de3513
 --- /dev/null
 +++ b/src/client_adaptor/ClientAdaptorMgr.h
-@@ -0,0 +1,91 @@
+@@ -0,0 +1,111 @@
 +#ifndef CLIENT_ADAPTOR_MGR_H
 +#define CLIENT_ADAPTOR_MGR_H
 +
-+#include <map>
++#include <set>
 +#include <string>
-+#include <iostream>
-+#include <cstring>
++#include <osdc/Objecter.h>
 +extern "C"
 +{
-+#include "ccm_interface.h"
-+#include "conf_parser.h"
++#include "open_ccm.h"
 +}
++
++enum {
++  RET_OK = 0,
++  RET_PARAM_ERROR,
++  RET_CCM_PT_NUM_ERROR,
++  RET_CCM_PT_ENTRY_ERROR,
++  RET_CCM_NODE_INFO_ERROR,
++  RET_CCM_AGENT_INIT_ERROR,
++  RET_CONF_PARSER_ERROR,
++  RET_CCM_PORT_NUM_ERROR,
++  RET_CCM_IP_ERROR,
++  RET_CCM_REGISTER_ERROR,
++  RET_CCM_PARAM_ERROR
++};
 +
 +class ClientAdaptorMgr {
 +public:
 +  ClientAdaptorMgr(){}
 +  virtual ~ClientAdaptorMgr(){}
 +
-+  virtual int32_t init_mgr() = 0;
++  virtual int32_t init_mgr(Objecter *obj) = 0;
 +
 +  virtual int32_t get_pt_num(uint32_t& num) = 0;
 +
@@ -227,6 +242,8 @@ index 00000000..cc9b2d0e
 +
 +  void set_init_flag(bool flag);
 +
++  virtual bool get_pt_status(uint32_t pt_id) = 0;
++  virtual void ccm_deregister(Objecter *obj) = 0;
 +private:
 +  bool init_flag = false;
 +};
@@ -236,7 +253,7 @@ index 00000000..cc9b2d0e
 +  ClientAdaptorCcm(){}
 +  ~ClientAdaptorCcm() override {}
 +
-+  int32_t init_mgr();  
++  int32_t init_mgr(Objecter *obj);  
 +
 +  int32_t get_pt_num(uint32_t& num);
 +
@@ -246,8 +263,11 @@ index 00000000..cc9b2d0e
 +  const std::string name() override {
 +    return "ClientAdaptorCcm";
 +  }
-+
++  bool get_pt_status(uint32_t pt_id);
++  void ccm_deregister(Objecter *obj);
 +private:
++  std::map<Objecter*, PTViewChangeOpHandle* > register_objs;
++  bool ccm_callback_register(Objecter *obj);
 +}; 
 +
 +class ClientAdaptorLocal : public ClientAdaptorMgr {
@@ -255,7 +275,7 @@ index 00000000..cc9b2d0e
 +  ClientAdaptorLocal(){}
 +  ~ClientAdaptorLocal() override {}
 + 
-+  int32_t init_mgr(){
++  int32_t init_mgr(Objecter *obj){
 +    return 0;
 +  }  
 +  
@@ -270,7 +290,7 @@ index 00000000..cc9b2d0e
 +  }
 +
 +  int32_t get_node_info(uint32_t node_id, NodeInfo* node_info){
-+    strcpy(node_info->ipv4AddrStr, "localhost");
++    strcpy(node_info->publicAddrStr, "localhost");
 +    node_info->ports[0] = 1234;
 +    node_info->portNum = 1;
 +    return 0;
@@ -278,7 +298,10 @@ index 00000000..cc9b2d0e
 +  const std::string name() override {
 +    return "ClientAdaptorLocal";
 +  }
-+
++  bool get_pt_status(uint32_t pt_id) {
++    return true;
++  }
++  void ccm_deregister(Objecter *obj) {}
 +private:
 +};
 +
@@ -286,33 +309,45 @@ index 00000000..cc9b2d0e
 +#endif
 diff --git a/src/client_adaptor/ClientAdaptorMsg.cc b/src/client_adaptor/ClientAdaptorMsg.cc
 new file mode 100644
-index 00000000..0f50787a
+index 00000000000..0d87835131a
 --- /dev/null
 +++ b/src/client_adaptor/ClientAdaptorMsg.cc
-@@ -0,0 +1,281 @@
+@@ -0,0 +1,285 @@
 +#include <iostream>
-+
++#include <regex>
 +#include "ClientAdaptorMsg.h"
 +#include "ClientAdaptorMgr.h"
 +
-+
-+
-+#define RBD_DATA_OBJECT_NAME_FILTER_LEN 8
-+#define RBD_DATA_OBJECT_NAME_LEN 27
-+#define RBD_DATA_OBJECT_NAME "rbd_data"
-+#define RGW_BUCKET_ID_LEN 36
-+#define RGW_OBJECT_NAME_LEN 38
-+
-+#define SEGMENT_SIZE  4194304
-+#define SEGMENT_MASK  0x3FFFFF
-+
-+#define OBJECT_ID_LEN 16
++namespace {
++const int RBD_DATA_OBJECT_NAME_FILTER_LEN = 8;
++const int RBD_DATA_OBJECT_NAME_LEN = 27;
++const string RBD_DATA_OBJECT_NAME = "rbd_data";
++const int RGW_BUCKET_ID_LEN = 36;
++const int RGW_OBJECT_NAME_LEN = 38;
++const uint64_t SEGMENT_SIZE = 4194304;
++const uint64_t SEGMENT_MASK = 0x3FFFFF;
++const int OBJECT_ID_LEN = 16;
++const int GC_PORT_MIN = 7880;
++const int GC_PORT_MAX = 7889;
++}
 +
 +ClientAdaptorMsg::ClientAdaptorMsg(ClientAdaptorMgr* mgr) : mgr_ref(mgr){
 +}
 +
 +void ClientAdaptorMsg::push_strategy(Objecter *objecter, uint64_t pool_id, int32_t node_id, std::string oid_name, bufferlist &indata)
 +{
++    if (objecter == NULL) {
++        std::cout << __func__ << " Objecter null " << std::endl;
++        return;
++    }
++    if (oid_name.size() == 0) {
++        std::cout << __func__ << " oid_name size 0 " << std::endl;
++        return;
++    }
++    if (node_id < 0) {
++        std::cout << __func__ << " node id < 0 " << std::endl;
++        return;
++    }
 +    const char *cls = "rpc";
 +    const char *method = "das_prefetch";
 +    vector<OSDOp> nops(1);
@@ -334,20 +369,6 @@ index 00000000..0f50787a
 +    objecter->op_submit(objecter_op);
 +}
 +
-+void ClientAdaptorMsg::init_trans() {
-+
-+  return;
-+}
-+
-+
-+
-+
-+
-+
-+
-+
-+
-+
 +bool ClientAdaptorMsg::filter_msg(Objecter::op_target_t *t){
 +
 +  string obj_name = t->base_oid.name;	
@@ -355,7 +376,6 @@ index 00000000..0f50787a
 +  if (obj_name.size() < RBD_DATA_OBJECT_NAME_LEN) {
 +    return false;
 +  }
-+
 +
 +  if (obj_name.compare(0, RBD_DATA_OBJECT_NAME_FILTER_LEN, RBD_DATA_OBJECT_NAME) == 0){
 +    return true;
@@ -383,68 +403,64 @@ index 00000000..0f50787a
 +  return false;
 +}
 +
-+
-+
-+
 +int32_t ClientAdaptorMsg::get_node_id(string obj_name, int64_t pool_id, uint32_t& pt_id){
 +  if (obj_name.length() == 0 || pool_id < 0){
 +    std::cout << __func__ << " Client Adaptor: input parameter invalid!" << std::endl;
-+    return -1;
++    return -RET_CCM_PARAM_ERROR;
 +  }
-+
 +
 +  string obj_id = to_string(pool_id);
 +  obj_id += '_';
 +  obj_id += obj_name;
-+
 +  hash<string> hash_str;
 +  uint32_t obj_hashed_id = hash_str(obj_id);
-+
-+
 +
 +  uint32_t pt_num = 0;
 +  NodeInfo info = {0};
 +
 +  if (mgr_ref->get_pt_num(pt_num)){
 +    std::cout << __func__ << " Client Adaptor: Get PT number failed" << std::endl;
-+    return -1;
++    return -RET_CCM_PT_NUM_ERROR;
 +  }
 +
 +  if (pt_num == 0) {
 +    std::cout << __func__ << " Client Adaptor: Get PT number zero" << std::endl;
-+    return -1;
++    return -RET_CCM_PT_NUM_ERROR;
 +  }
 +
-+
 +  pt_id = obj_hashed_id % pt_num;
-+
 +
 +  PTViewPtEntry pt_entry = {0};
 +  if (mgr_ref->get_pt_entry(pt_id, &pt_entry)){
 +    std::cout << __func__ << " Client Adaptor: Get PT entry failed" << std::endl;
-+    return -1;
++    return -RET_CCM_PT_ENTRY_ERROR;
 +  }
 +  uint32_t node_id = pt_entry.masterNodeId << NODE_ID_OFFSET_BIT;
-+
 +  node_id += 0x1 << FLAG_OFFSET_BIT;
 +
 +  if (mgr_ref->get_node_info(pt_entry.masterNodeId, &info)){
 +    std::cout << __func__ << " Client Adaptor: Get node info failed" << std::endl;
-+    return -1;
++    return -RET_CCM_NODE_INFO_ERROR;
 +  }
 +  if (info.portNum > PORT_SUPPORT_MAX || info.portNum == 0) {
 +    std::cout << __func__ << " Client Adaptor: Port number invalid. Port Number: " << info.portNum  << std::endl;
-+    return -1;
++    return -RET_CCM_PORT_NUM_ERROR;
 +  }
 +  uint32_t pt_index = pt_entry.indexInNode;
-+
 +
 +  node_id += pt_index % info.portNum;
 +
 +  return node_id;
 +}
 +
-+
++bool ClientAdaptorMsg::valid_ip(string ip_addr)
++{
++    string regStr = "^((25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|[1-9])"\
++                    "(\\.(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)){3})|(0.0.0.0)$";
++    regex regIp(regStr);
++    bool matchValue = regex_match(ip_addr, regIp);
++    return matchValue;
++}
 +
 +
 +int32_t ClientAdaptorMsg::get_node_ip(uint32_t node_index, string& node_ip){
@@ -453,16 +469,24 @@ index 00000000..0f50787a
 +  NodeInfo info = {0};
 +  if (mgr_ref->get_node_info(node_id, &info)){
 +    std::cout << __func__ << " Client Adaptor: Get node info failed" << std::endl;
-+    return -1;
++    return RET_CCM_NODE_INFO_ERROR;
 +  }
 +  uint32_t port = info.ports[port_index];
++  if (port < GC_PORT_MIN || port > GC_PORT_MAX) {
++      return RET_CCM_PORT_NUM_ERROR;
++  }
++  string server_ip = info.publicAddrStr;
++  if (!valid_ip(server_ip)) {
++      return RET_CCM_IP_ERROR;
++  }
++
 +  string addr_str = "tcp://";
-+  addr_str += info.publicAddrStr;
++  addr_str += server_ip;
 +  addr_str += ":";
 +  addr_str += to_string(port);
 +  node_ip = addr_str;
 +
-+  return 0;
++  return RET_OK;
 +}
 +
 +void ClientAdaptorMsg::set_mgr(ClientAdaptorMgr* mgr){
@@ -476,6 +500,9 @@ index 00000000..0f50787a
 +
 +void das_req_prefetch(DasKvParam *params)
 +{
++    if (params == NULL) {
++        return;
++    }
 +    ClientAdaptorMsg *msg_ref = static_cast<ClientAdaptorMsg *>(params->handle);
 +    Objecter *obj = static_cast<Objecter *>(params->ctx);
 +    if (msg_ref->is_valid_object(obj) ==false) {
@@ -487,23 +514,23 @@ index 00000000..0f50787a
 +    while(left) {
 +        uint64_t max = std::min<uint64_t>(SEGMENT_SIZE - offset, left);
 +
-+	char buff[params->imageIdLen+OBJECT_ID_LEN + 1];
-+	snprintf(buff, params->imageIdLen + 1, "%s", params->imageIdBuf);
-+	snprintf(buff+params->imageIdLen, OBJECT_ID_LEN+1, "%016x", id);
-+	std::string oid_name(buff);
-+	uint32_t pt_id;
-+	int32_t node_id = msg_ref->get_node_id(oid_name, params->cephPoolId, pt_id);
-+	if (node_id < 0) {
-+	    ceph_abort();
-+	}
-+	bufferlist indata;
-+	encode(offset, indata);
-+	encode(max, indata);
-+	msg_ref->push_strategy(obj, params->cephPoolId, node_id, oid_name, indata);
++        char buff[params->imageIdLen+OBJECT_ID_LEN + 1];
++        snprintf(buff, params->imageIdLen + 1, "%s", params->imageIdBuf);
++        snprintf(buff+params->imageIdLen, OBJECT_ID_LEN+1, "%016x", id);
++        std::string oid_name(buff);
++        uint32_t pt_id;
++        int32_t node_id = msg_ref->get_node_id(oid_name, params->cephPoolId, pt_id);
++        if (node_id < 0) {
++            ceph_abort();
++        }
++        bufferlist indata;
++        encode(offset, indata);
++        encode(max, indata);
++        msg_ref->push_strategy(obj, params->cephPoolId, node_id, oid_name, indata);
 +
-+	left -= max;
-+	offset = 0;
-+	id++;
++        left -= max;
++        offset = 0;
++        id++;
 +    };
 +}
 +
@@ -518,7 +545,7 @@ index 00000000..0f50787a
 +    regOps->SubmitDasPrefetch = das_req_prefetch;
 +    dasInstanceParam->ops = regOps;
 +
-+    rc = Rcache_CeateDasModule(this, dasInstanceParam);
++    rc = OpenRcacheCreateDasModule(this, dasInstanceParam);
 +    if (rc) {
 +      return -1;
 +    }
@@ -545,24 +572,24 @@ index 00000000..0f50787a
 +    int i = 0;
 +    for(vector<OSDOp>::iterator p = op->ops.begin(); p != op->ops.end(); ++p) {
 +    	if (p->op.op == CEPH_OSD_OP_READ || p->op.op == CEPH_OSD_OP_SPARSE_READ || p->op.op == CEPH_OSD_OP_SYNC_READ) {
-+	    params[i] = reinterpret_cast<DasKvParam*>(new char[sizeof(DasKvParam) + found + 1]);
-+	    params[i]->offset = p->op.extent.offset;
-+	    params[i]->len = p->op.extent.length;
-+	    params[i]->opcode = 0;
-+	    params[i]->timeStamp = ns;
-+	    params[i]->cephPoolId = op->target.base_oloc.pool;
-+	    params[i]->algType = DAS_ALG_SEQ;
-+	    params[i]->objId = objId;
-+	    params[i]->imageIdLen =found + 1;
-+	    memcpy(params[i]->imageIdBuf, obj_name.c_str(), params[i]->imageIdLen);
-+	    params[i]->handle = this;
-+	    params[i]->ctx = obj;
-+	    i++;
-+	}
++            params[i] = reinterpret_cast<DasKvParam*>(new char[sizeof(DasKvParam) + found + 1]);
++            params[i]->offset = p->op.extent.offset;
++            params[i]->len = p->op.extent.length;
++            params[i]->opcode = 0;
++            params[i]->timeStamp = ns;
++            params[i]->cephPoolId = op->target.base_oloc.pool;
++            params[i]->algType = DAS_ALG_SEQ;
++            params[i]->objId = objId;
++            params[i]->imageIdLen =found + 1;
++            memcpy(params[i]->imageIdBuf, obj_name.c_str(), params[i]->imageIdLen);
++            params[i]->handle = this;
++            params[i]->ctx = obj;
++            i++;
++        }
 +    }
 +
 +    if (i) {
-+      int rc = Rcache_PutDasInfo(params, i);
++      int rc = OpenRcachePutDasInfo(params, i);
 +      if (rc)
 +	 return -1;
 +    }
@@ -573,7 +600,7 @@ index 00000000..0f50787a
 +
 diff --git a/src/client_adaptor/ClientAdaptorMsg.h b/src/client_adaptor/ClientAdaptorMsg.h
 new file mode 100644
-index 00000000..6bc2428b
+index 00000000000..c8661f8d89c
 --- /dev/null
 +++ b/src/client_adaptor/ClientAdaptorMsg.h
 @@ -0,0 +1,72 @@
@@ -583,7 +610,7 @@ index 00000000..6bc2428b
 +#include <string>
 +#include <map>
 +#include <stdint.h>
-+#include "das.h"
++#include "open_das.h"
 +
 +#include "osdc/Objecter.h"
 +#include "ClientAdaptorMgr.h"
@@ -595,7 +622,6 @@ index 00000000..6bc2428b
 +
 +void push_strategy(Objecter *objecter, uint64_t pool_id, int32_t node_id, std::string oid_name, bufferlist &indata);
 +
-+void init_trans();
 +
 +int32_t das_init(Objecter *obj);
 +
@@ -603,7 +629,7 @@ index 00000000..6bc2428b
 +  das_objs.erase(obj);
 +  if (das_objs.empty() && initialized) {
 +    initialized = false;
-+    Rcache_ExitDasModule(this);
++    OpenRcacheExitDasModule(this);
 +  }
 +}
 +
@@ -614,8 +640,6 @@ index 00000000..6bc2428b
 +const string name() {return "ClientAdaptorMsg";}
 +
 +bool is_node(uint32_t index);
-+
-+uint32_t get_node_index(std::string obj_name, int64_t pool_id);
 +
 +int32_t get_node_id(string obj_name, int64_t pool_id, uint32_t& pt_index);
 +
@@ -645,13 +669,16 @@ index 00000000..6bc2428b
 +private:
 +  bool initialized = false;
 +  std::set<Objecter *> das_objs;
++  bool valid_ip(string ip_addr);
++public:
++  std::unordered_set<void *> connections;
 +};
 +
 +
 +#endif
 diff --git a/src/client_adaptor/ClientAdaptorPerf.cc b/src/client_adaptor/ClientAdaptorPerf.cc
 new file mode 100644
-index 00000000..b5fa9f53
+index 00000000000..b5fa9f532b4
 --- /dev/null
 +++ b/src/client_adaptor/ClientAdaptorPerf.cc
 @@ -0,0 +1,83 @@
@@ -740,7 +767,7 @@ index 00000000..b5fa9f53
 +
 diff --git a/src/client_adaptor/ClientAdaptorPerf.h b/src/client_adaptor/ClientAdaptorPerf.h
 new file mode 100644
-index 00000000..4996d952
+index 00000000000..4996d952108
 --- /dev/null
 +++ b/src/client_adaptor/ClientAdaptorPerf.h
 @@ -0,0 +1,50 @@
@@ -796,7 +823,7 @@ index 00000000..4996d952
 +
 diff --git a/src/client_adaptor/ClientAdaptorPlugin.cc b/src/client_adaptor/ClientAdaptorPlugin.cc
 new file mode 100644
-index 00000000..77a1e686
+index 00000000000..77a1e686a99
 --- /dev/null
 +++ b/src/client_adaptor/ClientAdaptorPlugin.cc
 @@ -0,0 +1,39 @@
@@ -841,7 +868,7 @@ index 00000000..77a1e686
 +}
 diff --git a/src/client_adaptor/ClientAdaptorPlugin.h b/src/client_adaptor/ClientAdaptorPlugin.h
 new file mode 100644
-index 00000000..8685aad8
+index 00000000000..8685aad8ee2
 --- /dev/null
 +++ b/src/client_adaptor/ClientAdaptorPlugin.h
 @@ -0,0 +1,33 @@
@@ -878,46 +905,260 @@ index 00000000..8685aad8
 +};
 +
 +#endif
+diff --git a/src/client_adaptor/open_ccm.h b/src/client_adaptor/open_ccm.h
+new file mode 100644
+index 00000000000..d735594947f
+--- /dev/null
++++ b/src/client_adaptor/open_ccm.h
+@@ -0,0 +1,143 @@
++#ifndef __CCM_INTERFACE_H__
++#define __CCM_INTERFACE_H__
++
++#include <stdint.h>
++#include <stdbool.h>
++#include <time.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#define PT_VIEW_MAX_COPY_NUM        (6)
++#define MAX_DISK_NUM_PER_NODE       (16)
++#define IP_ADDR_LEN                 (16)
++#define DISK_NAME_LEN               (64)
++#define DISK_SN_LEN                 (64)
++#define MAX_PORT_NUM                (8)
++
++typedef enum {
++    VDISK_STATE_DOWN = 0,
++    VDISK_STATE_UP   = 1,
++    VDISK_STATE_BUTT
++} VdiskState;
++
++typedef struct {
++    uint32_t nodeId;
++    uint32_t diskId;
++    char diskName[DISK_NAME_LEN];
++    char sn[DISK_SN_LEN];
++    uint32_t capacity;
++    uint32_t usedCap;
++    VdiskState state;
++} VdiskInfo;
++
++typedef struct {
++    uint32_t nodeId;
++    uint32_t state;
++    uint32_t ipv4Addr;
++    char ipv4AddrStr[IP_ADDR_LEN];
++    char publicAddrStr[IP_ADDR_LEN];
++    char clusterAddrStr[IP_ADDR_LEN];
++    int32_t portNum;
++    uint32_t ports[MAX_PORT_NUM];
++    uint32_t diskNum;
++    VdiskInfo diskList[MAX_DISK_NUM_PER_NODE];
++} NodeInfo;
++
++typedef enum __PTViewPtState {
++    PTVIEW_PT_STATE_INIT = 0,
++    PTVIEW_PT_STATE_NORMAL = 1,
++    PTVIEW_PT_STATE_FAULT = 2,
++    PTVIEW_PT_STATE_DEGRADE_LOSS1 = 3,
++    PTVIEW_PT_STATE_DEGRADE_LOSS2 = 4,
++    PTVIEW_PT_STATE_DEGRADE_LOSS3 = 5,
++    PTVIEW_PT_STATE_DEGRADE_LOSS4 = 6,
++    PTVIEW_PT_STATE_DEGRADE_LOSS5 = 7,
++    PTVIEW_PT_STATE_DEGRADE_LOSS6 = 8,
++    PTVIEW_PT_STATE_NO_USE = 9,
++    PTVIEW_PT_STATE_FORCE_POWER_ON = 10,
++    PTVIEW_PT_STATE_REPLAY = 11,
++    PTVIEW_PT_STATE_RECOVERY = 12,
++    PTVIEW_PT_STATE_BUTT
++} PTViewPtState;
++
++typedef enum __PTViewPtNodeState {
++    PTVIEW_PT_NODE_STATE_UP = 1,
++    PTVIEW_PT_NODE_STATE_DOWN = 2,
++    PTVIEW_PT_NODE_STATE_BUTT
++} PTViewPtNodeState;
++
++typedef enum __PTViewPtDiskState {
++    PTVIEW_PT_DISK_STATE_IN = 1,
++    PTVIEW_PT_DISK_STATE_OUT = 2,
++    PTVIEW_PT_DISK_STATE_BUTT
++} PTViewPtDiskState;
++
++typedef enum __PTViewPtCopyState {
++    PTVIEW_PT_COPY_STATE_RUNNING = 1,
++    PTVIEW_PT_COPY_STATE_SILENCE = 2,
++    PTVIEW_PT_COPY_STATE_EMPTY = 3,
++    PTVIEW_PT_COPY_STATE_RECOVERY = 4,
++    PTVIEW_PT_COPY_STATE_REPLAYED = 5,
++    PTVIEW_PT_COPY_STATE_DIRTY = 6,
++    PTVIEW_PT_COPY_STATE_CLEAN = 7,
++    PTVIEW_PT_COPY_STATE_BUTT
++} PTViewPtCopyState;
++
++typedef struct {
++    uint32_t nodeId;
++    uint32_t diskId;
++    PTViewPtCopyState copyState;
++    PTViewPtNodeState nodeState;
++    PTViewPtDiskState diskState;
++} PTViewPtCopy;
++
++typedef struct {
++    uint32_t ptId;
++    uint64_t globalVersion;
++    uint64_t birthVersion;
++    uint32_t currCopyNum;
++    uint32_t masterNodeId;
++    uint32_t indexInNode;
++    PTViewPtState state;
++    uint32_t copySiteNode[PT_VIEW_MAX_COPY_NUM];
++    uint32_t copySiteDomain[PT_VIEW_MAX_COPY_NUM];
++    PTViewPtCopyState copyStates[PT_VIEW_MAX_COPY_NUM];
++    PTViewPtNodeState copySiteDomainStates[PT_VIEW_MAX_COPY_NUM];
++    PTViewPtCopy copyList[PT_VIEW_MAX_COPY_NUM];
++} PTViewPtEntry;
++
++typedef struct {
++    void *ctx;
++    int32_t (*notifyPtChange)(PTViewPtEntry *entry, uint32_t entryNum, void *ctx);
++} PTViewChangeOpHandle;
++
++typedef enum {
++    CCM_MODULE_INFRAS = 0,
++    CCM_MODULE_INDEX = 1,
++    CCM_MODULE_RCACHE = 2,
++    CCM_MODULE_WCACHE = 3,
++    CCM_MODULE_CLIENT = 4,
++    CCM_MODULE_CEPH = 5,
++    CCM_MODULE_PLOG = 6,
++    CCM_MODULE_STREAM = 7,
++    CCM_MODULE_POOL = 8,
++    CCM_MODULE_BUTT
++} ModuleType;
++
++int32_t OpenAgentInit(void);
++
++int32_t OpenGetPtEntry(uint32_t ptId, PTViewPtEntry *entry);
++
++uint32_t OpenGetTotalPtNum(void);
++
++int32_t OpenAgentGetNodeInfo(uint32_t nodeId, NodeInfo *nodeInfo);
++
++int32_t OpenRegisterViewChangeNotifyChain(PTViewChangeOpHandle *handle, uint8_t type);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif // __CCM_INTERFACE_H__
+\ No newline at end of file
+diff --git a/src/client_adaptor/open_das.h b/src/client_adaptor/open_das.h
+new file mode 100644
+index 00000000000..8d2d233c964
+--- /dev/null
++++ b/src/client_adaptor/open_das.h
+@@ -0,0 +1,52 @@
++#ifndef OPEN_DAS_H
++#define OPEN_DAS_H
++
++#include <cstdio>
++#include <cstdint>
++#include <cstdlib>
++#include <string>
++
++typedef enum EnumDasResult {
++    RETURN_DAS_FULL = -2,
++    RETURN_DAS_ERROR = -1,
++    RETURN_DAS_OK = 0,
++    RETURN_DAS_EMPTY = 1,
++    RETURN_DAS_DELETING = 2,
++} DAS_RESULT;
++
++typedef enum TagDasAlgType {
++    DAS_ALG_SEQ = 0,
++    DAS_ALG_REVERSE_SEQ,
++    DAS_ALG_STRIDE,
++    DAS_ALG_BUTT
++} DasAlgType;
++
++typedef struct TagDasKvParam {
++    uint64_t offset;
++    uint64_t len;
++    uint8_t opcode;
++    uint64_t timeStamp;
++    uint64_t cephPoolId;
++    DasAlgType algType;
++    uint64_t objId;
++    uint32_t imageIdLen;
++    void *ctx;
++    void *handle;
++    char imageIdBuf[0];
++} DasKvParam;
++
++typedef struct TagDasOPS {
++    void (*SubmitDasPrefetch)(DasKvParam* params);
++} DasOPS;
++
++typedef struct TagDasModuleParam {
++    DasOPS *ops;
++} DasModuleParam;
++
++int32_t OpenRcacheCreateDasModule(void *handle, DasModuleParam *createInstanceParam);
++
++int32_t OpenRcachePutDasInfo(DasKvParam *params[], uint32_t keyNum);
++
++void OpenRcacheExitDasModule(void *handle);
++
++#endif // OPEN_DAS_H
+\ No newline at end of file
 diff --git a/src/common/options.cc b/src/common/options.cc
-index 8135ea8f..98df4758 100644
+index 8135ea8f1eb..fb9215e3a9b 100644
 --- a/src/common/options.cc
 +++ b/src/common/options.cc
-@@ -1013,11 +1013,11 @@ std::vector<Option> get_global_options() {
-     Option("ms_die_on_bug", Option::TYPE_BOOL, Option::LEVEL_DEV)
+@@ -1014,9 +1014,15 @@ std::vector<Option> get_global_options() {
      .set_default(false)
      .set_description("Induce a crash/exit on various bugs (for testing purposes)"),
--
+ 
 +#ifdef WITH_GLOBAL_CACHE
-     Option("ms_dispatch_throttle_bytes", Option::TYPE_SIZE, Option::LEVEL_ADVANCED)
--    .set_default(100_M)
++    Option("ms_dispatch_throttle_bytes", Option::TYPE_SIZE, Option::LEVEL_ADVANCED)
 +    .set_default(0)
++    .set_description("Limit messages that are read off the network but still being processed"),
++#else
+     Option("ms_dispatch_throttle_bytes", Option::TYPE_SIZE, Option::LEVEL_ADVANCED)
+     .set_default(100_M)
      .set_description("Limit messages that are read off the network but still being processed"),
--
 +#endif
+ 
      Option("ms_bind_ipv4", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
      .set_default(true)
-     .set_description("Bind servers to IPv4 address(es)")
-@@ -2307,15 +2307,15 @@ std::vector<Option> get_global_options() {
-     Option("objecter_timeout", Option::TYPE_FLOAT, Option::LEVEL_ADVANCED)
+@@ -2308,6 +2314,15 @@ std::vector<Option> get_global_options() {
      .set_default(10.0)
      .set_description("Seconds before in-flight op is considered 'laggy' and we query mon for the latest OSDMap"),
--
-+#ifdef WITH_GLOBAL_CACHE
-     Option("objecter_inflight_op_bytes", Option::TYPE_SIZE, Option::LEVEL_ADVANCED)
--    .set_default(100_M)
-+    .set_default(0)
-     .set_description("Max in-flight data in bytes (both directions)"),
  
-     Option("objecter_inflight_ops", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
--    .set_default(1024)
++#ifdef WITH_GLOBAL_CACHE
++    Option("objecter_inflight_op_bytes", Option::TYPE_SIZE, Option::LEVEL_ADVANCED)
 +    .set_default(0)
++    .set_description("Max in-flight data in bytes (both directions)"),
++
++    Option("objecter_inflight_ops", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
++    .set_default(0)
++    .set_description("Max in-flight operations"),
++#else
+     Option("objecter_inflight_op_bytes", Option::TYPE_SIZE, Option::LEVEL_ADVANCED)
+     .set_default(100_M)
+     .set_description("Max in-flight data in bytes (both directions)"),
+@@ -2315,6 +2330,7 @@ std::vector<Option> get_global_options() {
+     Option("objecter_inflight_ops", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
+     .set_default(1024)
      .set_description("Max in-flight operations"),
--
 +#endif
+ 
      Option("objecter_completion_locks_per_session", Option::TYPE_UINT, Option::LEVEL_DEV)
      .set_default(32)
-     .set_description(""),
-@@ -5587,6 +5587,14 @@ std::vector<Option> get_global_options() {
+@@ -5587,6 +5603,14 @@ std::vector<Option> get_global_options() {
      Option("debug_heartbeat_testing_span", Option::TYPE_INT, Option::LEVEL_DEV)
      .set_default(0)
      .set_description("Override 60 second periods for testing only"),
@@ -932,7 +1173,25 @@ index 8135ea8f..98df4758 100644
    });
  }
  
-@@ -7537,6 +7545,11 @@ static std::vector<Option> get_rbd_options() {
+@@ -7222,11 +7246,15 @@ static std::vector<Option> get_rbd_options() {
+     Option("rbd_non_blocking_aio", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
+     .set_default(true)
+     .set_description("process AIO ops from a dispatch thread to prevent blocking"),
+-
++#ifdef WITH_GLOBAL_CACHE
++    Option("rbd_cache", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
++    .set_default(false)
++    .set_description("whether to enable caching (writeback unless rbd_cache_max_dirty is 0)"),
++#else
+     Option("rbd_cache", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
+     .set_default(true)
+     .set_description("whether to enable caching (writeback unless rbd_cache_max_dirty is 0)"),
+-
++#endif
+     Option("rbd_cache_writethrough_until_flush", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
+     .set_default(true)
+     .set_description("whether to make writeback caching writethrough until "
+@@ -7537,6 +7565,11 @@ static std::vector<Option> get_rbd_options() {
      .set_default(60)
      .set_min(0)
      .set_description("RBD Image access timestamp refresh interval. Set to 0 to disable access timestamp update."),
@@ -945,21 +1204,21 @@ index 8135ea8f..98df4758 100644
  }
  
 diff --git a/src/include/config-h.in.cmake b/src/include/config-h.in.cmake
-index d83a59b2..91d1acdf 100644
+index d83a59b2c56..12dfdf5e611 100644
 --- a/src/include/config-h.in.cmake
 +++ b/src/include/config-h.in.cmake
 @@ -187,6 +187,9 @@
  /* Define if you want to use Babeltrace */
  #cmakedefine WITH_BABELTRACE
  
-+
++/* Define if you want to use Global Cache */
 +#cmakedefine WITH_GLOBAL_CACHE
 +
  /* Define to 1 if you have the <babeltrace/babeltrace.h> header file. */
  #cmakedefine HAVE_BABELTRACE_BABELTRACE_H 1
  
 diff --git a/src/librbd/ImageCtx.cc b/src/librbd/ImageCtx.cc
-index 8375d1a6..68983334 100644
+index 8375d1a6390..68983334297 100644
 --- a/src/librbd/ImageCtx.cc
 +++ b/src/librbd/ImageCtx.cc
 @@ -270,6 +270,18 @@ public:
@@ -982,7 +1241,7 @@ index 8375d1a6..68983334 100644
      plb.add_u64_counter(l_librbd_discard_bytes, "discard_bytes", "Discarded data", NULL, 0, unit_t(UNIT_BYTES));
      plb.add_time_avg(l_librbd_discard_latency, "discard_latency", "Discard latency");
 diff --git a/src/librbd/Types.h b/src/librbd/Types.h
-index 3f110447..e33023fb 100644
+index 3f1104478eb..e33023fb79c 100644
 --- a/src/librbd/Types.h
 +++ b/src/librbd/Types.h
 @@ -22,6 +22,14 @@ enum {
@@ -1001,7 +1260,7 @@ index 3f110447..e33023fb 100644
    l_librbd_discard_bytes,
    l_librbd_discard_latency,
 diff --git a/src/librbd/io/ImageDispatchSpec.h b/src/librbd/io/ImageDispatchSpec.h
-index 93c53a0f..7551fb0c 100644
+index 93c53a0fe8b..7551fb0c06e 100644
 --- a/src/librbd/io/ImageDispatchSpec.h
 +++ b/src/librbd/io/ImageDispatchSpec.h
 @@ -121,7 +121,11 @@ public:
@@ -1018,7 +1277,7 @@ index 93c53a0f..7551fb0c 100644
    void fail(int r);
  
 diff --git a/src/librbd/io/ImageRequestWQ.cc b/src/librbd/io/ImageRequestWQ.cc
-index 34f2c2cf..cae0341a 100644
+index 34f2c2cf2ba..cae0341ac6d 100644
 --- a/src/librbd/io/ImageRequestWQ.cc
 +++ b/src/librbd/io/ImageRequestWQ.cc
 @@ -286,7 +286,13 @@ void ImageRequestWQ<I>::aio_read(AioCompletion *c, uint64_t off, uint64_t len,
@@ -1079,7 +1338,7 @@ index 34f2c2cf..cae0341a 100644
    ThreadPool::PointerWQ<ImageDispatchSpec<I> >::queue(req);
  }
 diff --git a/src/msg/Message.cc b/src/msg/Message.cc
-index d36a95eb..e5384c3e 100644
+index d36a95ebe2d..e5384c3e5ca 100644
 --- a/src/msg/Message.cc
 +++ b/src/msg/Message.cc
 @@ -202,6 +202,8 @@
@@ -1106,11 +1365,120 @@ index d36a95eb..e5384c3e 100644
      trace.event("created trace");
    }
    trace.keyval("tid", get_tid());
+diff --git a/src/msg/async/ProtocolV2.cc b/src/msg/async/ProtocolV2.cc
+index 4b03f5ebcf4..7bc18292232 100644
+--- a/src/msg/async/ProtocolV2.cc
++++ b/src/msg/async/ProtocolV2.cc
+@@ -13,6 +13,12 @@
+ #include "auth/AuthClient.h"
+ #include "auth/AuthServer.h"
+ 
++#ifdef WITH_GLOBAL_CACHE
++#include "client_adaptor/ClientAdaptorPlugin.h"
++#include "client_adaptor/ClientAdaptorMsg.h"
++#include <iomanip>
++#endif
++
+ #define dout_subsys ceph_subsys_ms
+ #undef dout_prefix
+ #define dout_prefix _conn_prefix(_dout)
+@@ -1708,6 +1714,37 @@ CtPtr ProtocolV2::send_auth_request(std::vector<uint32_t> &allowed_methods) {
+   vector<uint32_t> preferred_modes;
+   auto am = auth_meta;
+   connection->lock.unlock();
++#ifdef WITH_GLOBAL_CACHE
++  PluginRegistry *reg = cct->get_plugin_registry();
++  auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
++  ceph_assert(plugin);
++  if (plugin->msg_ref->connections.find(connection) != plugin->msg_ref->connections.end()) {
++    ldout(cct, 3) << __func__ << " Client Adaptor: dummy get_auth_request. " << dendl;
++    am->auth_method = CEPH_AUTH_NONE;
++    preferred_modes = { CEPH_CON_MODE_CRC };
++    connection->lock.lock();
++    if (state != AUTH_CONNECTING) {
++      ldout(cct, 1) << __func__ << " state changed!" << dendl;
++      return _fault();
++    }
++  } else {
++    int r = messenger->auth_client->get_auth_request(
++      connection, am.get(),
++      &am->auth_method, &preferred_modes, &bl);
++    connection->lock.lock();
++    if (state != AUTH_CONNECTING) {
++      ldout(cct, 1) << __func__ << " state changed!" << dendl;
++      return _fault();
++    }
++    if (r < 0) {
++      ldout(cct, 0) << __func__ << " get_initial_auth_request returned " << r
++        << dendl;
++      stop();
++      connection->dispatch_queue->queue_reset(connection);
++      return nullptr;
++    }
++  }
++#else
+   int r = messenger->auth_client->get_auth_request(
+     connection, am.get(),
+     &am->auth_method, &preferred_modes, &bl);
+@@ -1723,6 +1760,7 @@ CtPtr ProtocolV2::send_auth_request(std::vector<uint32_t> &allowed_methods) {
+     connection->dispatch_queue->queue_reset(connection);
+     return nullptr;
+   }
++#endif
+ 
+   INTERCEPT(9);
+ 
+@@ -1811,6 +1849,37 @@ CtPtr ProtocolV2::handle_auth_done(ceph::bufferlist &payload)
+   ceph_assert(messenger->auth_client);
+   auto am = auth_meta;
+   connection->lock.unlock();
++#ifdef WITH_GLOBAL_CACHE
++  PluginRegistry *reg = cct->get_plugin_registry();
++  auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
++  ceph_assert(plugin);
++  if (plugin->msg_ref->connections.find(connection) != plugin->msg_ref->connections.end()) {
++    ldout(cct, 3) << __func__ << " Client Adaptor: dummy handle_auth_done. " << dendl;
++    connection->lock.lock();
++    if (state != AUTH_CONNECTING) {
++      ldout(cct, 1) << __func__ << " state changed!" << dendl;
++      return _fault();
++    }
++  } else {
++    int r = messenger->auth_client->handle_auth_done(
++      connection,
++      am.get(),
++      auth_done.global_id(),
++      auth_done.con_mode(),
++      auth_done.auth_payload(),
++      &am->session_key,
++      &am->connection_secret);
++
++    connection->lock.lock();
++    if (state != AUTH_CONNECTING) {
++      ldout(cct, 1) << __func__ << " state changed!" << dendl;
++      return _fault();
++    }
++    if (r < 0) {
++      return _fault();
++    }
++  }
++#else
+   int r = messenger->auth_client->handle_auth_done(
+     connection,
+     am.get(),
+@@ -1827,6 +1896,7 @@ CtPtr ProtocolV2::handle_auth_done(ceph::bufferlist &payload)
+   if (r < 0) {
+     return _fault();
+   }
++#endif
+   auth_meta->con_mode = auth_done.con_mode();
+   session_stream_handlers = \
+     ceph::crypto::onwire::rxtx_t::create_handler_pair(cct, *auth_meta, false);
 diff --git a/src/osdc/Objecter.cc b/src/osdc/Objecter.cc
-index bc39114a..56fd77fa 100644
+index bc39114ac59..819804bcfdb 100644
 --- a/src/osdc/Objecter.cc
 +++ b/src/osdc/Objecter.cc
-@@ -51,6 +51,15 @@
+@@ -51,6 +51,18 @@
  #include "common/errno.h"
  #include "common/EventTrace.h"
  
@@ -1121,12 +1489,15 @@ index bc39114a..56fd77fa 100644
 +#include "client_adaptor/ClientAdaptorPerf.h"
 +#include "common/address_helper.h"
 +#include <iomanip>
++
++#include <sys/syscall.h>
++#define gettid() syscall(__NR_gettid)
 +#endif
 +
  using ceph::real_time;
  using ceph::real_clock;
  
-@@ -236,6 +245,28 @@ void Objecter::init()
+@@ -236,6 +248,29 @@ void Objecter::init()
  {
    ceph_assert(!initialized);
  
@@ -1134,19 +1505,20 @@ index bc39114a..56fd77fa 100644
 +  PluginRegistry *reg = cct->get_plugin_registry();
 +  auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
 +  ceph_assert(plugin);
-+
-+  if ((static_cast<ClientAdaptorPlugin *>(plugin))->mgr_ref->init_mgr()){
-+    ldout(cct, 3) << "Client Adaptor: " << __func__ << " Initiate manager failed" << dendl;
++  int32_t ccm_ret = (static_cast<ClientAdaptorPlugin *>(plugin))->mgr_ref->init_mgr(this);
++  if (ccm_ret){
++    ldout(cct, 3) << "Client Adaptor: " << __func__ << " Initiate manager failed ret " << ccm_ret << dendl;
 +    (static_cast<ClientAdaptorPlugin *>(plugin))->mgr_ref->set_init_flag(false);
 +    ceph_abort();
 +  }
 +  (static_cast<ClientAdaptorPlugin *>(plugin))->mgr_ref->set_init_flag(true);
 +  if (cct->_conf.get_val<bool>("global_cache")) {
 +    if ((static_cast<ClientAdaptorPlugin *>(plugin))->msg_ref->das_init(this)){
-+    ldout(cct, 3) << "Client Adaptor: " << __func__ << " Initiate DAS failed, close prefetch" << dendl;
++      ldout(cct, 3) << "Client Adaptor: " << __func__ << " Initiate DAS failed, close prefetch" << dendl;
 +    }
 +  }
-+
++  ldout(cct, 3) << __func__ << "Client Adaptor: PID " << dec << getpid() << " TID: " << gettid() << dendl;
++  ldout(cct, 3) << __func__ << "Client Adaptor: Objecter pointer: " << hex << this << dendl;
 +  if (cct->_conf.get_val<bool>("global_cache_tick")) {
 +    plugin->perf_ref->start_record(plugin);
 +  }
@@ -1155,16 +1527,10 @@ index bc39114a..56fd77fa 100644
    if (!logger) {
      PerfCountersBuilder pcb(cct, "objecter", l_osdc_first, l_osdc_last);
  
-@@ -400,11 +431,27 @@ void Objecter::shutdown()
+@@ -400,6 +435,43 @@ void Objecter::shutdown()
  {
    ceph_assert(initialized);
  
-+
-   unique_lock wl(rwlock);
- 
-   initialized = false;
- 
-   wl.unlock();
 +#ifdef WITH_GLOBAL_CACHE
 +  PluginRegistry *reg = cct->get_plugin_registry();
 +  auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
@@ -1176,14 +1542,36 @@ index bc39114a..56fd77fa 100644
 +  }
 +  if (plugin){
 +    plugin->msg_ref->das_remove(this);
++    plugin->mgr_ref->ccm_deregister(this);
 +    std::lock_guard l(reg->lock);
 +    reg->remove("global_cache", "client_adaptor_plugin");
 +  }
++
++  while(!retry_op.op_waiting_for_retry.empty()) {
++    map<uint32_t, std::queue<Op*>>::iterator i = retry_op.op_waiting_for_retry.begin();
++    retry_op.op_waiting_for_retry.erase(i->first);
++  }
++
++  while(!retry_op.reboot_session_ops.empty()) {
++    set<Connection*>::iterator i = retry_op.reboot_session_ops.begin();
++    retry_op.reboot_session_ops.erase(i);
++  }
++
++  while(!retry_op.reboot_retry_ops.empty()) {
++    map<ceph_tid_t, Op*>::iterator i = retry_op.reboot_retry_ops.begin();
++    retry_op.reboot_retry_ops.erase(i->first);
++  }
++
++  while(!retry_op.reboot_retry_submit_ops.empty()) {
++    retry_op.reboot_retry_submit_ops.pop_back();
++  }
++  ldout(cct, 3) << __func__ << "Client Adaptor: PID " << dec << getpid() << " TID: " << gettid() << dendl;
++  ldout(cct, 3) << __func__ << "Client Adaptor: Objecter pointer: " << hex << this << dendl;
 +#endif
-   cct->_conf.remove_observer(this);
-   wl.lock();
+   unique_lock wl(rwlock);
  
-@@ -1234,12 +1281,26 @@ void Objecter::handle_osd_map(MOSDMap *m)
+   initialized = false;
+@@ -1234,12 +1306,26 @@ void Objecter::handle_osd_map(MOSDMap *m)
  			 need_resend_linger, need_resend_command, sul,
  			 &m->gap_removed_snaps);
  	  ++p;
@@ -1195,8 +1583,8 @@ index bc39114a..56fd77fa 100644
 +      // osd means one Global Cache connection
 +      ldout(cct, 3) << "Client Adaptor: " << __func__ << " bypass close osd session for 0x" << hex << s->osd << dendl;
 +    } else if (!osdmap->is_up(s->osd) ||
-+	 (s->con &&
-+	  s->con->get_peer_addrs() != osdmap->get_addrs(s->osd))) {
++	      (s->con &&
++	       s->con->get_peer_addrs() != osdmap->get_addrs(s->osd))) {
 +      close_session(s);
 +    }
 +#else
@@ -1210,7 +1598,7 @@ index bc39114a..56fd77fa 100644
  	}
  
  	ceph_assert(e == osdmap->get_epoch());
-@@ -1772,6 +1833,49 @@ int Objecter::_get_session(int osd, OSDSession **session, shunique_lock& sul)
+@@ -1772,6 +1858,53 @@ int Objecter::_get_session(int osd, OSDSession **session, shunique_lock& sul)
      return 0;
    }
  
@@ -1225,7 +1613,7 @@ index bc39114a..56fd77fa 100644
 +    s->get();
 +    *session = s;
 +    ldout(cct, 20) << __func__ << " s=" << s << " osd=" << osd << " "
-+	 << s->get_nref() << dendl;
++	        << s->get_nref() << dendl;
 +    return 0;
 +  }
 +  if (!sul.owns_lock()) {
@@ -1236,13 +1624,13 @@ index bc39114a..56fd77fa 100644
 +  // osd_entry = osd;
 +  if (plugin->msg_ref->is_node(osd)) {
 +    string node_ip = "";
-+    if (plugin->msg_ref->get_node_ip(osd, node_ip)){
-+      ldout(cct, 3) << "Client Adaptor: " << __func__ << " Get node ip failed" << dendl;
++    ldout(cct, 3) << "Client Adaptor: " << __func__ << " osd = 0x" << hex << osd << dendl;
++    uint32_t ret = plugin->msg_ref->get_node_ip(osd, node_ip);
++    if (ret){
++      ldout(cct, 3) << "Client Adaptor: " << __func__ << " Get node ip failed, ret " << ret << dendl;
 +      ceph_abort();
 +    }
 +
-+    //osd_entry &=~(0xfffc0);
-+    ldout(cct, 3) << "Client Adaptor: " << __func__ << " osd = 0x" << hex << osd << dendl;
 +    ldout(cct, 3) << "Client Adaptor: " << __func__ << " ip address = " << node_ip.c_str() << dendl;
 +    entity_addr_t node_addr;
 +    entity_addr_from_url(&node_addr, node_ip.c_str());
@@ -1251,6 +1639,10 @@ index bc39114a..56fd77fa 100644
 +    s = new OSDSession(cct, osd);
 +    osd_sessions[osd] = s;
 +    s->con = messenger->connect_to_osd(node_addrs);
++    plugin->msg_ref->connections.insert((void*)(s->con.get()));
++    for (auto it : plugin->msg_ref->connections) {
++      ldout(cct, 3) << "Client Adaptor: con = " << it << dendl;
++    }
 +  } else {
 +    s = new OSDSession(cct, osd);
 +    osd_sessions[osd] = s;
@@ -1260,7 +1652,7 @@ index bc39114a..56fd77fa 100644
    map<int,OSDSession*>::iterator p = osd_sessions.find(osd);
    if (p != osd_sessions.end()) {
      OSDSession *s = p->second;
-@@ -1787,6 +1891,7 @@ int Objecter::_get_session(int osd, OSDSession **session, shunique_lock& sul)
+@@ -1787,6 +1920,7 @@ int Objecter::_get_session(int osd, OSDSession **session, shunique_lock& sul)
    OSDSession *s = new OSDSession(cct, osd);
    osd_sessions[osd] = s;
    s->con = messenger->connect_to_osd(osdmap->get_addrs(osd));
@@ -1268,7 +1660,50 @@ index bc39114a..56fd77fa 100644
    s->con->set_priv(RefCountedPtr{s});
    logger->inc(l_osdc_osd_session_open);
    logger->set(l_osdc_osd_sessions, osd_sessions.size());
-@@ -2453,6 +2558,17 @@ void Objecter::_op_submit(Op *op, shunique_lock& sul, ceph_tid_t *ptid)
+@@ -2363,10 +2497,20 @@ void Objecter::_op_submit(Op *op, shunique_lock& sul, ceph_tid_t *ptid)
+   // pick target
+   ceph_assert(op->session == NULL);
+   OSDSession *s = NULL;
++#ifdef WITH_GLOBAL_CACHE
++  bool pt_stat = true;
++  bool check_for_latest_map = _calc_pt_target(&op->target, nullptr, pt_stat)
++    == RECALC_OP_TARGET_POOL_DNE;
+ 
++  if (!pt_stat) {
++    retry_op.reboot_retry_submit_ops.push_back(op);
++    ldout(cct, 3) << " this " << this << " " << __func__ << " op " << op << "pt unnormal, hang on IO waiting for retry by pt normal trigger " << dendl;
++    return;
++  }
++#else
+   bool check_for_latest_map = _calc_target(&op->target, nullptr)
+     == RECALC_OP_TARGET_POOL_DNE;
+-
++#endif
+   // Try to get a session, including a retry if we need to take write lock
+   int r = _get_session(op->target.osd, &s, sul);
+   if (r == -EAGAIN ||
+@@ -2382,8 +2526,19 @@ void Objecter::_op_submit(Op *op, shunique_lock& sul, ceph_tid_t *ptid)
+       // map changed; recalculate mapping
+       ldout(cct, 10) << __func__ << " relock raced with osdmap, recalc target"
+ 		     << dendl;
++#ifdef WITH_GLOBAL_CACHE
++      check_for_latest_map = _calc_pt_target(&op->target, nullptr, pt_stat)
++        == RECALC_OP_TARGET_POOL_DNE;
++
++      if (!pt_stat) {
++        retry_op.reboot_retry_submit_ops.push_back(op);
++        ldout(cct, 3) << __func__ << " op " << op << "pt unnormal, hang on IO waiting for retry by pt normal trigger " << dendl;
++        return;
++      }
++#else
+       check_for_latest_map = _calc_target(&op->target, nullptr)
+-	== RECALC_OP_TARGET_POOL_DNE;
++	      == RECALC_OP_TARGET_POOL_DNE;
++#endif
+       if (s) {
+ 	put_session(s);
+ 	s = NULL;
+@@ -2453,6 +2608,17 @@ void Objecter::_op_submit(Op *op, shunique_lock& sul, ceph_tid_t *ptid)
    _session_op_assign(s, op);
  
    if (need_send) {
@@ -1286,12 +1721,12 @@ index bc39114a..56fd77fa 100644
      _send_op(op);
    }
  
-@@ -2770,6 +2886,229 @@ void Objecter::_prune_snapc(
+@@ -2770,6 +2936,231 @@ void Objecter::_prune_snapc(
    }
  }
  
 +#ifdef WITH_GLOBAL_CACHE
-+int Objecter::_calc_target(op_target_t *t, Connection *con, bool any_change)
++int Objecter::_calc_pt_target(op_target_t *t, Connection *con, bool &pt_status, bool any_change)
 +{
 +  PluginRegistry *reg = cct->get_plugin_registry();
 +  auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
@@ -1301,10 +1736,10 @@ index bc39114a..56fd77fa 100644
 +    t->target_oloc = t->base_oloc;
 +    ldout(cct, 3) << " Client Adaptor: " << __func__ << " msg filter pass to Global Cache" << dendl;
 +    int64_t pool_id = t->base_oloc.pool;
-+    uint32_t pt_id;
++    uint32_t pt_id = 0;
 +    int32_t node_id = plugin->msg_ref->get_node_id(t->base_oid.name, pool_id, pt_id);
 +    if (node_id < 0) {
-+      ldout(cct, 3) << "Client Adaptor: " << __func__ << " Get node id failed" << dendl;
++      ldout(cct, 3) << "Client Adaptor: " << __func__ << " Get node id failed ret " << node_id << dendl;
 +      ceph_abort();
 +    }
 +    ldout(cct, 3) << "Client Adaptor: " << __func__ << " Send to PT " << pt_id << dendl;
@@ -1313,6 +1748,7 @@ index bc39114a..56fd77fa 100644
 +    ldout(cct, 3) << "Client Adaptor: " << __func__ << " Seed = " << t->actual_pgid.pgid.m_seed << dendl;
 +    t->actual_pgid.pgid.set_ps(pt_id);
 +    t->osd = node_id;
++    pt_status = plugin->mgr_ref->get_pt_status(pt_id);
 +    return RECALC_OP_TARGET_NO_ACTION;
 +  } else {
 +    // rwlock is locked
@@ -1512,20 +1948,20 @@ index bc39114a..56fd77fa 100644
 +    return RECALC_OP_TARGET_NO_ACTION;
 +  }
 +}
-+#else
++#endif
++
  int Objecter::_calc_target(op_target_t *t, Connection *con, bool any_change)
  {
    // rwlock is locked
-@@ -2968,6 +3307,8 @@ int Objecter::_calc_target(op_target_t *t, Connection *con, bool any_change)
-   }
+@@ -2969,6 +3360,7 @@ int Objecter::_calc_target(op_target_t *t, Connection *con, bool any_change)
    return RECALC_OP_TARGET_NO_ACTION;
  }
-+#endif
-+
  
++
  int Objecter::_map_session(op_target_t *target, OSDSession **s,
  			   shunique_lock& sul)
-@@ -3271,6 +3612,39 @@ void Objecter::_send_op(Op *op)
+ {
+@@ -3271,6 +3663,38 @@ void Objecter::_send_op(Op *op)
    if (op->trace.valid()) {
      m->trace.init("op msg", nullptr, &op->trace);
    }
@@ -1553,10 +1989,9 @@ index bc39114a..56fd77fa 100644
 +      }
 +      if (op.op.op == CEPH_OSD_OP_CALL) {
 +        auto bp = op.indata.cbegin();
-+	bp.copy(op.op.cls.class_len, cname);
-+	bp.copy(op.op.cls.method_len, mname);
-+	ldout(cct, 3) << "Client Adaptor: " << __func__ << " op call class: " << cname << " method: " << mname << dendl;
-+
++	      bp.copy(op.op.cls.class_len, cname);
++	      bp.copy(op.op.cls.method_len, mname);
++	      ldout(cct, 3) << "Client Adaptor: " << __func__ << " op call class: " << cname << " method: " << mname << dendl;
 +      }
 +    }
 +  }
@@ -1565,7 +2000,132 @@ index bc39114a..56fd77fa 100644
    op->session->con->send_message(m);
  }
  
-@@ -3348,7 +3722,11 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
+@@ -3326,6 +3750,124 @@ int Objecter::take_linger_budget(LingerOp *info)
+   return 1;
+ }
+ 
++#ifdef WITH_GLOBAL_CACHE
++void Objecter::retry_op_submit(vector<uint32_t> ready_pt_id)
++{
++  if (!ready_pt_id.size()) {
++    ldout(cct, 3) << __func__ << "ccm pt change notify, normal pt size 0 " << dendl;
++    return;
++  }
++  std::queue<std::queue<Op*>> deal_op;
++  map<uint32_t, std::queue<Op*>>::iterator iter;
++  unique_lock rl(retry_op.retrylock);
++  for (uint32_t i = 0; i < ready_pt_id.size(); i++) {
++    iter = retry_op.op_waiting_for_retry.find(ready_pt_id[i]);
++    if (iter != retry_op.op_waiting_for_retry.end()) {
++      deal_op.push(iter->second);
++      retry_op.op_waiting_for_retry.erase(iter);
++    }
++  }
++  rl.unlock();
++  ldout(cct, 3) << __func__ << "resend op queue size " << deal_op.size() << " remain resend size " << retry_op.op_waiting_for_retry.size() << dendl;
++
++  uint32_t resend_errort_op_num = 0;
++  while(!deal_op.empty()) {
++    std::queue<Op*> op_queue = deal_op.front();
++    deal_op.pop();
++    while(!op_queue.empty()) {
++      Op* op = op_queue.front();
++      op_queue.pop();
++      shunique_lock sul(rwlock, ceph::acquire_shared);
++      _op_submit(op, sul, NULL);
++      resend_errort_op_num++;
++    }
++  }
++  ldout(cct, 3) << __func__ << "resend errort op number " << resend_errort_op_num << dendl;
++
++
++  // reboot inflight ops
++
++  PluginRegistry *reg = cct->get_plugin_registry();
++  auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
++  ceph_assert(plugin);
++
++  rl.lock();
++  uint32_t resend_reboot_op_num = 0;
++  while(!retry_op.reboot_session_ops.empty()) {
++    shunique_lock sul(rwlock, ceph::acquire_shared);
++    set<Connection*>::iterator siter = retry_op.reboot_session_ops.begin();
++    auto priv = (static_cast<Connection*>(*siter))->get_priv();
++    auto session = static_cast<OSDSession*>(priv.get());
++    ldout(cct, 1) << "retry session " << session << " session op size" << session->ops.size() << dendl;
++    retry_op.reboot_session_ops.erase(siter);
++
++    string node_ip = "";
++    uint32_t ret = plugin->msg_ref->get_node_ip(session->osd, node_ip);
++    if (ret) {
++      ldout(cct, 3) << "Client Adaptor: " << __func__ << " Get node ip failed, ret " << ret << dendl;
++      ceph_abort();
++    }
++
++    ldout(cct, 3) << "Client Adaptor: " << __func__ << " ip address = " << node_ip.c_str() << dendl;
++    entity_addr_t node_addr;
++    entity_addr_from_url(&node_addr, node_ip.c_str());
++    node_addr.set_type(entity_addr_t::TYPE_MSGR2);
++    entity_addrvec_t node_addrs(node_addr);
++    OSDSession::unique_lock sl(session->lock);
++    if (session->con) {
++      plugin->msg_ref->connections.erase((void *)(session->con.get()));
++      session->con->set_priv(NULL);
++      session->con->mark_down();
++    }
++    session->con = messenger->connect_to_osd(node_addrs);
++    session->con->set_priv(RefCountedPtr{session});
++    session->incarnation++;
++    plugin->msg_ref->connections.insert((void *)(session->con.get()));
++
++    for (auto it: plugin->msg_ref->connections) {
++      ldout(cct, 3) << "Client Adaptor: con = " << it << dendl;
++    }
++    for (map<ceph_tid_t, Op*>::iterator p = session->ops.begin(); p != session->ops.end(); ++p) {
++      Op *op = p->second;
++      retry_op.reboot_retry_ops[op->tid] = op;
++    }
++
++    for (map<ceph_tid_t, Op*>::iterator p = retry_op.reboot_retry_ops.begin(); p != retry_op.reboot_retry_ops.end(); ) {
++      uint32_t pt_id = p->second->target.actual_pgid.pgid.m_seed;
++
++      if (plugin->mgr_ref->get_pt_status(pt_id)) {
++        _send_op(p->second);
++        resend_reboot_op_num++;
++        retry_op.reboot_retry_ops.erase(p++);
++      } else {
++        p++;
++      }
++    }
++    logger->inc(l_osdc_op_resend, retry_op.reboot_retry_ops.size());
++    sl.unlock();
++  }
++  retry_op.reboot_session_ops.clear();
++
++  // hang on io retry
++  uint32_t resend_hangon_op_num = 0;
++  for (auto iter = retry_op.reboot_retry_submit_ops.begin(); iter != retry_op.reboot_retry_submit_ops.end(); ) {
++    Op *op = static_cast<Op*>(*iter);
++    uint32_t pt_id = op->target.actual_pgid.pgid.m_seed;
++    if (plugin->mgr_ref->get_pt_status(pt_id)) {
++      shunique_lock sul(rwlock, ceph::acquire_shared);
++      _op_submit(op, sul, NULL);
++      resend_hangon_op_num++;
++      retry_op.reboot_retry_submit_ops.erase(iter);
++    } else {
++      ++iter;
++    }
++  }
++  ldout(cct, 3) << __func__ << " resend hangon op number " << resend_hangon_op_num << dendl;
++  rl.unlock();
++
++}
++#endif
++
+ /* This function DOES put the passed message before returning */
+ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
+ {
+@@ -3348,7 +3890,11 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
      m->put();
      return;
    }
@@ -1578,8 +2138,45 @@ index bc39114a..56fd77fa 100644
    OSDSession::unique_lock sl(s->lock);
  
    map<ceph_tid_t, Op *>::iterator iter = s->ops.find(tid);
-@@ -3445,6 +3823,16 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
+@@ -3406,7 +3952,6 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
+   Context *onfinish = 0;
  
+   int rc = m->get_result();
+-
+   if (m->is_redirect_reply()) {
+     ldout(cct, 5) << " got redirect reply; redirecting" << dendl;
+     if (op->onfinish)
+@@ -3443,8 +3988,45 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
+     return;
+   }
+ 
++#ifdef WITH_GLOBAL_CACHE
++  if (errort_filter(rc) && m->get_oid().name.find("rbd_data") != string::npos) {
++    ldout(cct, 3) << " op " << op << " error code " << rc << ", client resubmitting" << dendl;
++    if (op->onfinish)
++      num_in_flight--;
++    _session_op_remove(s, op);
++    sl.unlock();
++
++    op->tid = 0;
++    op->target.flags &= ~(CEPH_OSD_FLAG_BALANCE_READS |
++			  CEPH_OSD_FLAG_LOCALIZE_READS);
++    op->target.pgid = pg_t();
++    unique_lock rl(retry_op.retrylock);
++    std::queue<Op*> insert_op;
++    uint32_t pt_id = m->get_pg().m_seed;
++    map<uint32_t, std::queue<Op*>>::iterator iter = retry_op.op_waiting_for_retry.find(pt_id);
++    if (iter != retry_op.op_waiting_for_retry.end()) {
++      iter->second.push(op);
++    } else {
++      insert_op.push(op);
++      retry_op.op_waiting_for_retry[pt_id] = insert_op;
++    }
++    rl.unlock();
++    m->put();
++    return;
++  }
++#endif
    sul.unlock();
  
 +#ifdef WITH_GLOBAL_CACHE
@@ -1595,8 +2192,23 @@ index bc39114a..56fd77fa 100644
    if (op->objver)
      *op->objver = m->get_user_version();
    if (op->reply_epoch)
+@@ -4399,6 +4981,14 @@ bool Objecter::ms_handle_reset(Connection *con)
+     if (session) {
+       ldout(cct, 1) << "ms_handle_reset " << con << " session " << session
+ 		    << " osd." << session->osd << dendl;
++#ifdef WITH_GLOBAL_CACHE
++
++      if (session->osd >> 20) {
++        unique_lock rl(retry_op.retrylock);
++        retry_op.reboot_session_ops.insert(con);
++        rl.unlock();
++      }
++#endif
+       // the session maybe had been closed if new osdmap just handled
+       // says the osd down
+       if (!(initialized && osdmap->is_up(session->osd))) {
 diff --git a/src/osdc/Objecter.h b/src/osdc/Objecter.h
-index ca8d85f7..83d71ad7 100644
+index ca8d85f7ac1..918b41c1722 100644
 --- a/src/osdc/Objecter.h
 +++ b/src/osdc/Objecter.h
 @@ -1341,7 +1341,13 @@ public:
@@ -1614,8 +2226,73 @@ index ca8d85f7..83d71ad7 100644
      ConnectionRef con;  // for rx buffer only
      uint64_t features;  // explicitly specified op features
  
+@@ -1863,9 +1869,29 @@ public:
+ 
+   bool osdmap_full_flag() const;
+   bool osdmap_pool_full(const int64_t pool_id) const;
++#ifdef WITH_GLOBAL_CACHE
++
++
++  struct RetryOp {
++    map<uint32_t, std::queue<Op*>>op_waiting_for_retry; //error code retry
++    std::set<Connection*> reboot_session_ops; //reboot lost connect
++    map<ceph_tid_t, Op*> reboot_retry_ops; //reboot retry ops
++    std::vector<Op*> reboot_retry_submit_ops; //reboot hang on ops
++    mutable std::shared_mutex retrylock;
++    using unique_lock = std::unique_lock<decltype(retrylock)>;
++  };
++
++  RetryOp retry_op;
+ 
++  void retry_op_submit(vector<uint32_t> ready_pt_id);
++#endif
+  private:
+ 
++#ifdef WITH_GLOBAL_CACHE
++  int _calc_pt_target(op_target_t *t, Connection *con,
++            bool &pt_status, bool any_change = false);
++
++#endif
+   /**
+    * Test pg_pool_t::FLAG_FULL on a pool
+    *
+@@ -2057,6 +2083,34 @@ private:
+     return std::forward<Callback>(cb)(*osdmap, std::forward<Args>(args)...);
+   }
+ 
++  bool errort_filter(errorcode32_t returnCode)
++  {
++    switch (returnCode) {
++      case -EINTR:
++      case -EBUSY:
++      case -ETXTBSY:
++      case -ENOSPC:
++      case -EDEADLK:
++      case -EWOULDBLOCK:
++      case -ETIME:
++      case -ECOMM:
++      case -ERESTART:
++      case -ENETDOWN:
++      case -ENETRESET:
++      case -ECONNRESET:
++      case -ENOBUFS:
++      case -ETIMEDOUT:
++      case -EHOSTDOWN:
++      case -EALREADY:
++      case -ENOMEDIUM:
++      case -ECANCELED:
++        return true;
++      default:
++        return false;
++    }
++    return false;
++  }
++
+ 
+   /**
+    * Tell the objecter to throttle outgoing ops according to its
 diff --git a/src/test/CMakeLists.txt b/src/test/CMakeLists.txt
-index 5dcee169..fc342ccb 100644
+index 5dcee1694d1..fc342ccb90d 100644
 --- a/src/test/CMakeLists.txt
 +++ b/src/test/CMakeLists.txt
 @@ -31,6 +31,13 @@ add_subdirectory(fs)
@@ -1634,7 +2311,7 @@ index 5dcee169..fc342ccb 100644
    add_subdirectory(libradosstriper)
 diff --git a/src/test/ClientAdaptorTest/CMakeLists.txt b/src/test/ClientAdaptorTest/CMakeLists.txt
 new file mode 100644
-index 00000000..2eb494c3
+index 00000000000..2eb494c3375
 --- /dev/null
 +++ b/src/test/ClientAdaptorTest/CMakeLists.txt
 @@ -0,0 +1,11 @@
@@ -1651,10 +2328,10 @@ index 00000000..2eb494c3
 +message(STATUS "Client adaptor test cmake executing...")
 diff --git a/src/test/ClientAdaptorTest/ClientAdaptorTest.cc b/src/test/ClientAdaptorTest/ClientAdaptorTest.cc
 new file mode 100644
-index 00000000..40805e79
+index 00000000000..21a8ae73f83
 --- /dev/null
 +++ b/src/test/ClientAdaptorTest/ClientAdaptorTest.cc
-@@ -0,0 +1,370 @@
+@@ -0,0 +1,379 @@
 +#include <iostream>
 +#include <string.h>
 +#include <iomanip>
@@ -1666,14 +2343,14 @@ index 00000000..40805e79
 +#include "client_adaptor/ClientAdaptorMsg.h"
 +#include "client_adaptor/ClientAdaptorMgr.h"
 +#include "client_adaptor/ClientAdaptorPerf.h"
-+#include "ccm_interface.h"
++#include "client_adaptor/open_ccm.h"
 +#include "osdc/Objecter.h"
 +
 +class ClientAdaptorCcmMock : public ClientAdaptorMgr{
 +public:
 +  ClientAdaptorCcmMock(){}
 +  ~ClientAdaptorCcmMock() override {}
-+  int32_t init_mgr() override {
++  int32_t init_mgr(Objecter *obj) override {
 +    std::cout << "Client Adaptor: Init CCM Mock successfully" << std::endl;
 +    return 0;
 +  }
@@ -1693,7 +2370,7 @@ index 00000000..40805e79
 +  }
 +
 +  int32_t get_node_info(uint32_t node_id, NodeInfo* node_info) override {
-+    strcpy(node_info->ipv4AddrStr, "192.168.200.2");
++    strcpy(node_info->publicAddrStr, "localhost");
 +    node_info->ports[0] = 68;
 +    node_info->portNum = 1;
 +    return 0 ;
@@ -1702,6 +2379,10 @@ index 00000000..40805e79
 +  const string name() override {
 +      return "ClientAdaptorCcmMock";
 +  }
++  bool get_pt_status(uint32_t pt_id) {
++    return true;
++  }
++  void ccm_deregister(Objecter *obj) {}
 +};
 +
 +class ClientAdaptorTest : public ::testing::Test,
@@ -1751,6 +2432,11 @@ index 00000000..40805e79
 +
 +  auto mgr=plugin->mgr_ref;
 +  std::cout << "Client Adaptor: mgr name = " << mgr->name() << std::endl;
++  EXPECT_STREQ("ClientAdaptorCcm", mgr->name().c_str());
++
++  auto perf=plugin->perf_ref;
++  std::cout << "Client Adaptor: perf name = " << perf->name() << std::endl;
++  EXPECT_STREQ("ClientAdaptorPerf", perf->name().c_str());
 +  std::lock_guard l(reg->lock);
 +  reg->remove("global_cache", "client_adaptor_plugin");
 +
@@ -1803,12 +2489,12 @@ index 00000000..40805e79
 +  uint32_t node_id = plugin->msg_ref->get_node_id(obj_name, pool_id, pt_index);
 +  std::cout << "Client Adaptor: PT id  is " << pt_index << std::endl;
 +  std::cout << "Client Adaptor: Hashed node id is 0x " << hex << node_id << std::endl;
-+  EXPECT_EQ((uint32_t)0x100001, node_id);
++  EXPECT_EQ((uint32_t)0x100010, node_id);
 +
 +  string node_ip = "";
 +  EXPECT_EQ(0, plugin->msg_ref->get_node_ip(node_id, node_ip));
 +  std::cout << "Client Adaptor: Node IP =  " << node_ip << std::endl;
-+  EXPECT_STREQ("tcp://192.168.200.2:68", node_ip.c_str());
++  EXPECT_STREQ("tcp://localhost:68", node_ip.c_str());
 +
 +  std::lock_guard l(reg->lock);
 +  reg->remove("global_cache", "client_adaptor_plugin");
@@ -1940,7 +2626,7 @@ index 00000000..40805e79
 +  std::cout << "Client Adaptor: Before DI Mgr subclass is " << mgr->name() << std::endl;
 +  plugin->msg_ref->set_mgr(ccm_mock);
 +  mgr = plugin->msg_ref->get_mgr();
-+  int32_t res = mgr->init_mgr();
++  int32_t res = mgr->init_mgr(nullptr);
 +  bool init_flag = (res==0?true:false);
 +  mgr->set_init_flag(init_flag);
 +  bool is_succeed = mgr->is_init_succeed();
@@ -1969,7 +2655,7 @@ index 00000000..40805e79
 +  plugin->msg_ref->get_node_id(obj_name, pool_id, pt_index);
 +  PTViewPtEntry *entry = new PTViewPtEntry();
 +  NodeInfo *node_info = new NodeInfo();
-+  strcpy(node_info->ipv4AddrStr, "192.168.200.2");
++  strcpy(node_info->ipv4AddrStr, "localhost");
 +  node_info->ports[0] = 68;
 +  node_info->portNum = 1;
 +  plugin->mgr_ref->get_pt_num(num);
@@ -1982,7 +2668,7 @@ index 00000000..40805e79
 +  reg->remove("global_cache", "client_adaptor_plugin");
 +}
 +
-+TEST_P(ClientAdaptorTest, MgrInitTest123)
++TEST_P(ClientAdaptorTest, MgrInfoTest2)
 +{
 +
 +  PluginRegistry *reg = g_ceph_context->get_plugin_registry();
@@ -2002,7 +2688,7 @@ index 00000000..40805e79
 +  plugin->msg_ref->get_node_id(obj_name, pool_id, pt_index);
 +  PTViewPtEntry *entry = new PTViewPtEntry();
 +  NodeInfo *node_info = new NodeInfo();
-+  int32_t res = ccm->init_mgr();
++  int32_t res = ccm->init_mgr(nullptr);
 +  int32_t res1 = ccm->get_pt_num(num);
 +  int32_t res2 = ccm->get_pt_entry(pt_index,entry);
 +  int32_t res3 = ccm->get_node_info(node_id,node_info);
@@ -2027,7 +2713,7 @@ index 00000000..40805e79
 +);  
 diff --git a/src/test/ServerAdaptorSimulate/CMakeLists.txt b/src/test/ServerAdaptorSimulate/CMakeLists.txt
 new file mode 100644
-index 00000000..547e1dd9
+index 00000000000..547e1dd9257
 --- /dev/null
 +++ b/src/test/ServerAdaptorSimulate/CMakeLists.txt
 @@ -0,0 +1,9 @@
@@ -2042,7 +2728,7 @@ index 00000000..547e1dd9
 +)
 diff --git a/src/test/ServerAdaptorSimulate/global_cache_dispatcher.cc b/src/test/ServerAdaptorSimulate/global_cache_dispatcher.cc
 new file mode 100644
-index 00000000..1fbb82d0
+index 00000000000..baa2d8851e6
 --- /dev/null
 +++ b/src/test/ServerAdaptorSimulate/global_cache_dispatcher.cc
 @@ -0,0 +1,150 @@
@@ -2198,7 +2884,7 @@ index 00000000..1fbb82d0
 +}    // nothing
 diff --git a/src/test/ServerAdaptorSimulate/global_cache_dispatcher.h b/src/test/ServerAdaptorSimulate/global_cache_dispatcher.h
 new file mode 100644
-index 00000000..b2ce4390
+index 00000000000..b2ce4390115
 --- /dev/null
 +++ b/src/test/ServerAdaptorSimulate/global_cache_dispatcher.h
 @@ -0,0 +1,108 @@
@@ -2312,7 +2998,7 @@ index 00000000..b2ce4390
 +
 diff --git a/src/test/ServerAdaptorSimulate/global_cache_server.cc b/src/test/ServerAdaptorSimulate/global_cache_server.cc
 new file mode 100644
-index 00000000..486825aa
+index 00000000000..486825aa648
 --- /dev/null
 +++ b/src/test/ServerAdaptorSimulate/global_cache_server.cc
 @@ -0,0 +1,131 @@
@@ -2448,7 +3134,7 @@ index 00000000..486825aa
 +    return r;
 +}
 diff --git a/src/test/librbd/io/test_mock_ImageRequestWQ.cc b/src/test/librbd/io/test_mock_ImageRequestWQ.cc
-index 50daa83c..209740a8 100644
+index 50daa83c777..209740a8d07 100644
 --- a/src/test/librbd/io/test_mock_ImageRequestWQ.cc
 +++ b/src/test/librbd/io/test_mock_ImageRequestWQ.cc
 @@ -58,6 +58,11 @@ struct ImageDispatchSpec<librbd::MockTestImageCtx> {
@@ -2464,7 +3150,7 @@ index 50daa83c..209740a8 100644
    MOCK_CONST_METHOD0(start_op, void());
    MOCK_CONST_METHOD0(send, void());
 diff --git a/src/test/messenger/simple_client.cc b/src/test/messenger/simple_client.cc
-index ba7ed2b0..a04fdf4e 100644
+index ba7ed2b0966..8b1eee76049 100644
 --- a/src/test/messenger/simple_client.cc
 +++ b/src/test/messenger/simple_client.cc
 @@ -30,6 +30,7 @@ using namespace std;
@@ -2484,7 +3170,7 @@ index ba7ed2b0..a04fdf4e 100644
  	int n_dsize = 0;
  
  	struct timespec ts;
-@@ -101,12 +102,21 @@ int main(int argc, const char **argv)
+@@ -101,12 +102,20 @@ int main(int argc, const char **argv)
  	  "dest port " << port << " " <<
  	  "initial msgs (pipe depth) " << n_msgs << " " <<
  	  "data buffer size " << n_dsize << std::endl;
@@ -2505,11 +3191,10 @@ index ba7ed2b0..a04fdf4e 100644
 +        	dummy_auth.auth_registry.refresh_config();
 +	messenger->set_auth_client(&dummy_auth);
 +		messenger->set_auth_server(&dummy_auth);
-+
  	// enable timing prints
  	messenger->set_magic(MSG_MAGIC_TRACE_CTR);
  	messenger->set_default_policy(Messenger::Policy::lossy_client(0));
-@@ -115,10 +125,16 @@ int main(int argc, const char **argv)
+@@ -115,10 +124,16 @@ int main(int argc, const char **argv)
  	dest_str += addr;
  	dest_str += ":";
  	dest_str += port;
@@ -2526,7 +3211,7 @@ index ba7ed2b0..a04fdf4e 100644
  	messenger->add_dispatcher_head(dispatcher);
  
  	dispatcher->set_active(); // this side is the pinger
-@@ -127,7 +143,12 @@ int main(int argc, const char **argv)
+@@ -127,7 +142,12 @@ int main(int argc, const char **argv)
  	if (r < 0)
  		goto out;
  
@@ -2540,7 +3225,7 @@ index ba7ed2b0..a04fdf4e 100644
  
  	// do stuff
  	time_t t1, t2;
-@@ -144,6 +165,12 @@ int main(int argc, const char **argv)
+@@ -144,6 +164,12 @@ int main(int argc, const char **argv)
  	    m = new_simple_ping_with_data("simple_client", n_dsize);
  	  }
  	  conn->send_message(m);
@@ -2554,7 +3239,7 @@ index ba7ed2b0..a04fdf4e 100644
  
  	// do stuff
 diff --git a/src/test/messenger/simple_dispatcher.cc b/src/test/messenger/simple_dispatcher.cc
-index b13958d3..7e1011bb 100644
+index b13958d3686..7e1011bbd60 100644
 --- a/src/test/messenger/simple_dispatcher.cc
 +++ b/src/test/messenger/simple_dispatcher.cc
 @@ -17,6 +17,8 @@
@@ -2614,7 +3299,7 @@ index b13958d3..7e1011bb 100644
    //m->put();
  
 diff --git a/src/test/messenger/simple_server.cc b/src/test/messenger/simple_server.cc
-index 8b85f3af..34feff15 100644
+index 8b85f3afbcf..34feff15552 100644
 --- a/src/test/messenger/simple_server.cc
 +++ b/src/test/messenger/simple_server.cc
 @@ -28,6 +28,8 @@ using namespace std;
@@ -2669,7 +3354,7 @@ index 8b85f3af..34feff15 100644
  
  	// done
 diff --git a/src/vstart.sh b/src/vstart.sh
-index 37aa28b7..a146de36 100755
+index 37aa28b7375..a146de36a55 100755
 --- a/src/vstart.sh
 +++ b/src/vstart.sh
 @@ -752,6 +752,8 @@ EOF
@@ -2681,6 +3366,3 @@ index 37aa28b7..a146de36 100755
  	    echo "{\"cephx_secret\": \"$OSD_SECRET\"}" > $CEPH_DEV_DIR/osd$osd/new.json
              ceph_adm osd new $uuid -i $CEPH_DEV_DIR/osd$osd/new.json
  	    rm $CEPH_DEV_DIR/osd$osd/new.json
--- 
-2.23.0
-
