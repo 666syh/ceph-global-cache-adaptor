@@ -63,7 +63,7 @@
 #define ProxyDbgCrit(fmt, ...)                    \
 	fprintf(stderr, "[%s][%d][%s][CRI][PROXY][" fmt "]\n", __FILE__, __LINE__, __FUNCTION__, ##__VA_ARGS__)
 
-#define ProxyDbgLogErrR(fmt, ...)                    \
+#define ProxyDbgLogErr(fmt, ...)                    \
 	fprintf(stderr, "[%s][%d][%s][Err][PROXY][" fmt "]\n", __FILE__, __LINE__, __FUNCTION__, ##__VA_ARGS__)
 
 #define ProxyDbgLogWarn(fmt, ...)                    \
