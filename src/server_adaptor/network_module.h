@@ -1,8 +1,8 @@
 /*
+ *
  * Copyright (c) Huawei Technologies Co., Ltd. 2021-2021. All rights reserved.
  * Description: Interact with Messanger(ClientAdaptor) and CCM agent.
  */
-
 
 #ifndef NETWORK_MODULE_H
 #define NETWORK_MODULE_H
@@ -23,7 +23,7 @@
 #include "sa_export.h"
 
 class NetworkModule {
-    SaExport *sa {nullptr}
+    SaExport *sa {nullptr};
     pthread_t serverThread { 0 };
     pthread_t clientThread { 0 };
     pthread_t transToOpreqThread { 0 } ;
@@ -52,7 +52,7 @@ class NetworkModule {
     bool testMosdop { false };
 
     uint64_t queueNum { 0 };
-    uint64_t totalPtNum { 0 };
+    uint32_t queuemaxCapacity { 0 };
     std::vector<std::thread> doOpThread {};
     std::vector<ClientOpQueue *> opDispatcher {};
     std::vector<bool> finishThread {};
@@ -120,7 +120,6 @@ public:
 			delete i;
 		}
 	}
-        ptrOphandleInstance = nullptr;
         if (clientMessenger) {
             delete clientMessenger;
         }
@@ -142,7 +141,7 @@ public:
 
 
 
-    int InitNetworkModule(const std::string &rAddr, const std::string &rPort, const std::string &sAddr,
+    int InitNetworkModule(const std::string &rAddr, const std::vector<std::string> &rPort, const std::string &sAddr,
         const std::string &sPort, int *bind);
 
 
@@ -200,4 +199,3 @@ void EncodeXattrGetXattr(const SaBatchKv *keyValue, int i, MOSDOp *mosdop);
 void EncodeXattrGetXattrs(const SaBatchKv *keyValue, int i, MOSDOp *mosdop);
 void EncodeGetOpstat(uint64_t psize, time_t ptime, int i, MOSDOp *mosdop);
 #endif
-

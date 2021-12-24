@@ -127,55 +127,55 @@ typedef enum {
 } proxy_checksum_type_t;
 
 typedef enum {
-    CEPH_BDEV_HDD = 0X00,
+    CEPH_BDEV_HDD = 0x00,
     CEPH_BDEV_SSD = 0x01,
 } CEPH_BDEV_TYPE_E;
 
 typedef struct {
 
-    uint64_t num_bytes;
+    uint64_t numBytes;
 
-    uint64_t num_kb;
+    uint64_t numKb;
 
-    uint64_t num_objects;
+    uint64_t numObjects;
 
-    uint64_t num_object_clones;
+    uint64_t numObjectClones;
 
-    uint64_t num_object_copies;
+    uint64_t numObjectCopies;
 
-    uint64_t num_objects_missing_on_primary;
+    uint64_t numObjectsMissingOnPrimary;
 
-    uint64_t num_objects_unfound;
+    uint64_t numObjectsUnfound;
 
 
-    uint64_t num_objects_degraded;
+    uint64_t numObjectsDegraded;
 
-    uint64_t num_rd;
+    uint64_t numRd;
 
-    uint64_t num_rd_kb;
+    uint64_t numRdKb;
 
-    uint64_t num_wr;
+    uint64_t numWr;
 
-    uint64_t num_wr_kb;
+    uint64_t numWrKb;
 
-    uint64_t num_user_bytes;
+    uint64_t numUserBytes;
 
-    uint64_t compressed_bytes_orig;
+    uint64_t compressedBytesOrig;
 
-    uint64_t compressed_bytes;
+    uint64_t compressedBytes;
 
-    uint64_t compressed_bytes_alloc;
+    uint64_t compressedBytesAlloc;
 } CephPoolStat;
 
 typedef struct {
 
     uint64_t kb;
 
-    uint64_t kb_used;
+    uint64_t kbUsed;
 
-    uint64_t kb_avail;
+    uint64_t kbAvail;
 
-    uint64_t num_objects;
+    uint64_t numObjects;
 } CephClusterStat;
 
 typedef void *completion_t;
@@ -240,7 +240,7 @@ int64_t CephProxyGetPoolIdByPoolName(ceph_proxy_t proxy, const char *poolName);
 
 
 
-int CephProxyGetPoolNameByPoolId(ceph_proxy_t proxy, int64_t poolId, char *buf, unsigned maxlen);
+int CephProxyGetPoolNameByPoolId(ceph_proxy_t proxy, int64_t poolId, char *buf, unsigned maxLen);
 
 
 
@@ -284,7 +284,7 @@ int CephProxyGetPoolStat(ceph_proxy_t proxy, rados_ioctx_t ioctx, CephPoolStat *
 
 
 
-void CephProxyQueueOp(ceph_proxy_t proxy,rados_ioctx_t ioctx, ceph_proxy_op_t op, completion_t c);
+int32_t CephProxyQueueOp(ceph_proxy_t proxy, ceph_proxy_op_t op, completion_t c);
 
 
 

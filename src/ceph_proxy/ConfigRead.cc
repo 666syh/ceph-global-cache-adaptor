@@ -34,15 +34,15 @@ static const char *RADOS_OSD_OP_TIMEOUT	= "rados_osd_op_timeout";
 #define RETURN_OK 0
 #endif
 
-#ifndef RETURN_ERR
-#define RETURN_ERR (-1)
+#ifndef RETURN_ERROR
+#define RETURN_ERROR (-1)
 #endif
 
 typedef struct {
     char zkServerList[ZK_SERVER_LIST_STR_LEN];
     char cephConfPath[MAX_PATH_LEN];
     char logOutPath[MAX_PATH_LEN];
-    char coreId[MAX_CORE_NUMBER];
+    char coreIds[MAX_CORE_NUMBER];
 
     uint64_t workerNum;
     uint64_t msgrAmount;
@@ -58,7 +58,7 @@ static void InitClusterCfg()
     sprintf(g_ProxyCfg.zkServerList, "%s", DEFAULT_ZK_SERVER_LIST);
     sprintf(g_ProxyCfg.cephConfPath, "%s", DEFAULT_CEPH_CONF_PATH);
     sprintf(g_ProxyCfg.logOutPath, "%s", DEFAULT_LOG_PATH);
-    sprintf(g_ProxyCfg.coreId, "%s", DEFAULT_CORE_ARRAY);
+    sprintf(g_ProxyCfg.coreIds, "%s", DEFAULT_CORE_ARRAY);
 
     g_ProxyCfg.bindCore = DEFAULT_BIND_CORE;
     g_ProxyCfg.workerNum = DEFAULT_WORKER_NUM;
@@ -101,7 +101,7 @@ static uint8_t *SearchSubString(uint8_t *buf, const char *substr)
 
 static void ConfigTrim(uint8_t *str)
 {
-    int32_t istrLen = (uint32_t)strlen((char *)str);
+    int32_t istrLen = (int32_t)strlen((char *)str);
     while (istrLen > 0) {
         if ((str[istrLen - 1] == '\n') || (str[istrLen - 1] == ' ') || (str[istrLen - 1] == '\r')) {
 	    str[istrLen - 1] = '\0';
@@ -144,12 +144,12 @@ static int32_t CheckIsHexadecimal(uint8_t *ptemp)
     return RETURN_ERROR;
 }
 
-static uint32_t StringToIntByHexadecimal(uint8_t *ptemp, int64_t *intValue)
+static int32_t StringToIntByHexadecimal(uint8_t *ptemp, int64_t *intValue)
 {
     while (*ptemp != '\0') {
         if (*ptemp >= 'a' && *ptemp <= 'f') {
 	    *intValue = 16 * (*intValue) + *ptemp - 'a' + 10;
-	} else if {*ptemp >= 'A' && *ptemp <= 'F'} {
+	} else if (*ptemp >= 'A' && *ptemp <= 'F') {
 	    *intValue = 16 * (*intValue) + *ptemp - 'A' + 10;
 	} else if (*ptemp >= '0' && *ptemp <= '9') {
 	    *intValue = 16 * (*intValue) + *ptemp - '0';
@@ -229,7 +229,7 @@ static int32_t AnalyzeSubString(uint8_t *str)
     value = SearchSubString(str, CEPH_CONF_PATH);
     if (value != NULL) {
 	ConfigTrim(value);
-	ProxyDbgLogInfo("read config: %s, value %s.", CEPH_CONF_PATH, value);
+	ProxyDbgLogInfo("read config: %s, value: %s", CEPH_CONF_PATH, value);
         strcpy(g_ProxyCfg.cephConfPath, (char *)value);
 	return RETURN_OK;
     }
@@ -237,7 +237,7 @@ static int32_t AnalyzeSubString(uint8_t *str)
     value = SearchSubString(str, LOG_OUT_PATH);
     if (value != NULL) {
 	ConfigTrim(value);
-	ProxyDbgLogInfo("read config: %s, value %s.", LOG_OUT_PATH, value);
+	ProxyDbgLogInfo("read config: %s, value: %s.", LOG_OUT_PATH, value);
         strcpy(g_ProxyCfg.logOutPath, (char *)value);
 	return RETURN_OK;
     }
@@ -245,14 +245,14 @@ static int32_t AnalyzeSubString(uint8_t *str)
     value = SearchSubString(str, WORKER_NUM);
     if (value != NULL) {
 	ConfigTrim(value);
-	ProxyDbgLogInfo("read config: %s, value %s.", WORKER_NUM, value);
+	ProxyDbgLogInfo("read config: %s, value: %s.", WORKER_NUM, value);
 	return TransformValueToInt(value, &g_ProxyCfg.workerNum);
     }
 
     value = SearchSubString(str, CORE_NUMBER);
     if (value != NULL) {
 	ConfigTrim(value);
-	ProxyDbgLogInfo("read config: %s, value %s.", CORE_NUMBER, value);
+	ProxyDbgLogInfo("read config: %s, value: %s.", CORE_NUMBER, value);
         strcpy(g_ProxyCfg.coreIds, (char *)value);
 	return RETURN_OK;
     }
@@ -260,28 +260,28 @@ static int32_t AnalyzeSubString(uint8_t *str)
     value = SearchSubString(str, MSGR_AMOUNT);
     if (value != NULL) {
 	ConfigTrim(value);
-	ProxyDbgLogInfo("read config: %s, value %s.", MSGR_AMOUNT, value);
+	ProxyDbgLogInfo("read config: %s, value: %s.", MSGR_AMOUNT, value);
 	return TransformValueToInt(value, &g_ProxyCfg.msgrAmount);
     }
 
     value = SearchSubString(str, BIND_CORE);
     if (value != NULL) {
 	ConfigTrim(value);
-	ProxyDbgLogInfo("read config: %s, value %s.", BIND_CORE, value);
+	ProxyDbgLogInfo("read config: %s, value: %s.", BIND_CORE, value);
 	return TransformValueToInt(value, &g_ProxyCfg.bindCore);
     }
 
     value = SearchSubString(str, RADOS_MON_OP_TIMEOUT);
     if (value != NULL) {
 	ConfigTrim(value);
-	ProxyDbgLogInfo("read config: %s, value %s.", RADOS_MON_OP_TIMEOUT, value);
+	ProxyDbgLogInfo("read config: %s, value: %s.", RADOS_MON_OP_TIMEOUT, value);
 	return TransformValueToInt(value, &g_ProxyCfg.monTimeout);
     }
 
     value = SearchSubString(str, RADOS_OSD_OP_TIMEOUT);
     if (value != NULL) {
 	ConfigTrim(value);
-	ProxyDbgLogInfo("read config: %s, value %s.", RADOS_OSD_OP_TIMEOUT, value);
+	ProxyDbgLogInfo("read config: %s, value: %s", RADOS_OSD_OP_TIMEOUT, value);
 	return TransformValueToInt(value, &g_ProxyCfg.osdTimeout);
     }
 
@@ -290,19 +290,19 @@ static int32_t AnalyzeSubString(uint8_t *str)
 
 static int32_t ReadConfig(const char *configFile)
 {
-    FILE *pcfgFlie = NULL;
+    FILE *pcfgFile = NULL;
     uint8_t acBuf[CONFIG_BUFFSIZE];
     int32_t ret = RETURN_OK;
 
     pcfgFile = fopen(configFile, "r");
     if (pcfgFile == NULL) {
-	ProxyDbgLogErr("config failed to open file: s%.", configFile);
+	ProxyDbgLogErr("config failed to open file: %s.", configFile);
 	return RETURN_ERROR;
     }
 
     while (ret != RETURN_ERROR) {
 	memset(acBuf, 0, CONFIG_BUFFSIZE);
-	ret = ConfigReadbyLine(pcfgFile, acBuf, CONFIG_BUFFSIZE);
+	ret = ConfigReadByLine(pcfgFile, acBuf, CONFIG_BUFFSIZE);
 	if (ret != RETURN_OK) {
 	    ProxyDbgLogInfo("config read over.");
 	    ret = RETURN_OK;
@@ -335,6 +335,7 @@ int32_t ProxyConfigInit()
 	return RETURN_OK;
 }
 
+
 char *ProxyGetZkServerList()
 {
 	return g_ProxyCfg.zkServerList;
@@ -345,13 +346,11 @@ char *ProxyGetCoreNumber()
 	return g_ProxyCfg.coreIds;
 }
 
-char *ProxyGetCephConf()
-{
+char *ProxyGetCephConf() {
 	return g_ProxyCfg.cephConfPath;
 }
 
-char *ProxyGetLogPath()
-{
+char *ProxyGetLogPath() {
 	return g_ProxyCfg.logOutPath;
 }
 
@@ -367,7 +366,7 @@ uint32_t ProxyGetMsgrAmount()
 
 uint32_t ProxyGetBindCore()
 {
-	return g_ProxyCfg.bindcore;
+	return g_ProxyCfg.bindCore;
 }
 
 uint64_t ProxyGetOsdTimeOut()

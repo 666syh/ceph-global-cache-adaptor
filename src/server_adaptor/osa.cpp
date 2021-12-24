@@ -98,9 +98,9 @@ bool CheckLocalIp(const string &ipaddr)
     return ret;
 }
 
-bool Checkport(const char *pPort, uint64_t strLen)
+bool CheckPort(const char *pPort, uint64_t strLen)
 {
-	if (IsDigt(pPort, strLen) == false) {
+	if (IsDigit(pPort, strLen) == false) {
 		Salog(LV_ERROR, LOG_TYPE, "error : port is not digit");
 		return false;
 	}
@@ -121,7 +121,7 @@ int OSA_Init(SaExport &sa)
 {
     InitSalog(sa);
     char curDate[128] = {0};
-    memset(curDate, 0, sizeos(curDate));
+    memset(curDate, 0, sizeof(curDate));
     string strDate = "1208-";
     strcpy(curDate, strDate.c_str());
 #ifdef NDEBUG
@@ -131,11 +131,11 @@ int OSA_Init(SaExport &sa)
 #endif
     string filePath = sa.GetConfPath(); 
     filePath += "config_sa.conf";
-    Salog(LV_WARNING, LOG_TYPE, "OSA conf_file path is %s", filePath.c_str());
+    Salog(LV_INFORMATION, LOG_TYPE, "OSA conf_file path is %s", filePath.c_str());
     
     OsaConfigRead readConfig;
     if (readConfig.CacheClusterConfigInit(filePath.c_str())) {
-	    Salog(LV_CRITICAL, LOG_TYPE, "error : read config file");
+	    Salog(LV_CRITICAL, LOG_TYPE, "error : read config file.");
 	    return ERROR_PORT;
     }
     string rAddr = readConfig.GetListenIp();
@@ -144,7 +144,7 @@ int OSA_Init(SaExport &sa)
 	    return ERROR_PORT;
     }
 
-    string rPort = readConfig.etListenPort();
+    string rPort = readConfig.GetListenPort();
     vector<string> vecPort;
     const char *delimPort = ",";
     std::unique_ptr<char[]> tmpPort = std::make_unique<char[]>(rPort.size() + 1);
@@ -153,7 +153,7 @@ int OSA_Init(SaExport &sa)
     char *savePort;
     pPort = strtok_r(tmpPort.get(), delimPort, &savePort);
     while (pPort) {
-	    if (CheckPort(pPort, strLen(pPort)) == false) {
+	    if (CheckPort(pPort, strlen(pPort)) == false) {
 		    Salog(LV_CRITICAL, LOG_TYPE, "error port %s", rPort.c_str());
 		    return ERROR_PORT;
     	    }
@@ -192,9 +192,9 @@ int OSA_Init(SaExport &sa)
     }
    
     uint32_t queueMaxCapacity = readConfig.GetQueueMaxCapacity();
-    if (queueMaxCapacity > SA_QUEUE_MAX_CAPACIT || queueMaxCapacity < SA_QUEUE_MIN_CAPACITY) {
+    if (queueMaxCapacity > SA_QUEUE_MAX_CAPACITY || queueMaxCapacity < SA_QUEUE_MIN_CAPACITY) {
 	Salog(LV_CRITICAL, LOG_TYPE, "error : queueMaxCapacity number is %d should between %d~%d", queueMaxCapacity,
-			SA_QUEUE_MIN_CAPACITY, SA_QUEUE_MAX_CAPACIT);
+			SA_QUEUE_MIN_CAPACITY, SA_QUEUE_MAX_CAPACITY);
 	return ERROR_PORT;
     }
 
@@ -207,7 +207,7 @@ int OSA_Init(SaExport &sa)
 
     uint32_t bindCore = readConfig.GetBindCore();
     uint32_t bindSaCore = readConfig.GetBindQueueCore();
-    Salog(LV_WARNING, LOG_TYPE, " core binding is %d, %d", bindCore, bindSaCore);
+    Salog(LV_WARNING, LOG_TYPE, "core binding is %d, %d", bindCore, bindSaCore);
     if((msgrAmount + vecPort.size()) > vecCoreId.size() && bindCore) {
         Salog(LV_CRITICAL, LOG_TYPE, "error : SA needs more than %d cores !", (msgrAmount+vecPort.size()));
         return ERROR_PORT;
@@ -215,7 +215,7 @@ int OSA_Init(SaExport &sa)
 
     char szMsgrAmount[4] = {0};
     sprintf(szMsgrAmount, "%d", msgrAmount);
-    Salog(LV_INFORMATION, LOG_TYPE, " Server adaptor init queueAmount=%d szMsgrAmount=%s bindCore=%d bindSaCore=%d",
+    Salog(LV_INFORMATION, LOG_TYPE, "Server adaptor init queueAmount=%d szMsgrAmount=%s bindCore=%d bindSaCore=%d",
 		    queueAmount, szMsgrAmount, bindCore, bindSaCore);
 
     vector<const char *> args = { "--conf", "/opt/gcache/conf/config_sa.conf" };
@@ -237,7 +237,7 @@ int OSA_Init(SaExport &sa)
 	    return 1;
 	}
 	int bindSuccess = -1;
-	ret = g_ptrNetwork->InitNetworkModule(rAddr, rPort, sAddr, sPort, &bindSuccess);
+	ret = g_ptrNetwork->InitNetworkModule(rAddr, vecPort, sAddr, sPort, &bindSuccess);
 
 	rpc_handler = new ClassHandler(g_ceph_context);
 	cls_initialize(rpc_handler);
@@ -252,7 +252,7 @@ int OSA_Init(SaExport &sa)
 	}
 	int sleepCnt = 0;
 	while (bindSuccess == -1) {
-	   SalogLimit(LV_WARNING,  LOG_TYPE, "bindSuccess==-1");
+	   SalogLimit(LV_WARNING,  LOG_TYPE, "bindSuccess == -1");
 	   sleep(1);
 	   if (sleepCnt++ >= 60) {
 		ret = ERROR_BIND;
@@ -366,7 +366,7 @@ int OSA_ExecClass(SaOpContext *pctx, PREFETCH_FUNC prefetch)
 	bp.copy(clientop.op.cls.method_len, mname);
 	bp.copy(clientop.op.cls.indata_len, indata);
     } catch ( buffer::error &e) {
-	Salog(LV_ERROR, LOG_TYPE, "unable to decode class [%s] + method[%s] + indata[%d]", cname_c_str(), mname.c_str(), 
+	Salog(LV_ERROR, LOG_TYPE, "unable to decode class [%s] + method[%s] + indata[%d]", cname.c_str(), mname.c_str(), 
 			clientop.op.cls.indata_len);
 	return -EINVAL;
     }
@@ -385,13 +385,13 @@ int OSA_ExecClass(SaOpContext *pctx, PREFETCH_FUNC prefetch)
     ClassHandler::ClassData *cls;
     int ret = rpc_handler->open_class(cname, &cls);
     if ( ret) {
-	Salog(LV_ERROR,LOG_TYPE, "can't open class [%s] ret [%d]", cname, ret);
+	Salog(LV_ERROR,LOG_TYPE, "can't open class [%s] ret [%d]", cname.c_str(), ret);
 	return -EOPNOTSUPP;
     }
 
     ClassHandler::ClassMethod *method = cls->get_method(mname.c_str());
     if (!method) {
-	Salog(LV_ERROR,LOG_TYPE, "can't find class [%s] + method[%s]", cname, mname);
+	Salog(LV_ERROR,LOG_TYPE, "can't find class [%s] + method[%s]", cname.c_str(), mname.c_str());
 	return -EOPNOTSUPP;
     }
   

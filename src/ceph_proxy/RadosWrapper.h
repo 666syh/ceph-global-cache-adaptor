@@ -9,7 +9,7 @@
 void RadosBindMsgrWorker(std::vector<uint32_t> coreId, pid_t pid);
 
 int RadosClientInit(rados_client_t *client, const std::string &cephConf);
-int RadosSetConf(rados_client_t *client, const char *option, const char *value);
+int RadosSetConf(rados_client_t client, const char *option, const char *value);
 void RadosClientShutdown(rados_client_t client);
 int RadosOperationAioOperate(rados_client_t client, rados_op_t op, rados_ioctx_t io, userCallback_t fn, void *cbArg);
 int RadosCreateIoCtx(rados_client_t client, const std::string &poolname, rados_ioctx_t *ctx);

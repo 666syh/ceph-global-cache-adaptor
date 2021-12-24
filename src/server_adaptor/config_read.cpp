@@ -1,17 +1,35 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #include "config_read.h"
 
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
-#include <srdio.h>
+#include <stdio.h>
 #include <string.h>
+
+
 
 #define CLUSTER_CONFIG_FILE "/home/config_sa.conf"
 #define CONFIG_BUFFSIZE 500
 #define MAX_CPU_NUM (256)
 
 static const char *LOCAL_IPV4_ADDR = "local_ipv4_addr";
-static const char *LOCAL_PORT = "local_port"
+static const char *LOCAL_PORT = "local_port";
 static const char *ZK_SERVER_LIST = "zk_server_list";
 static const char *IOD_CORE = "iod_core";
 static const char *XNET_CORE = "xnet_core";
@@ -30,7 +48,7 @@ static const char *QUEUE_MAX_CAPACITY = "queue_max_capacity";
 static const char *MSGR_AMOUNT = "msgr_amount";
 static const char *BIND_CORE = "bind_core";
 static const char *BIND_QUEUE_CORE = "bind_queue_core";
-static const char *PERF = "pref";
+static const char *PERF = "perf";
 
 #ifndef RETURN_OK
 #define RETURN_OK 0
@@ -44,7 +62,7 @@ typedef struct {
 	uint64_t ipv4Addr { 0 };
 	uint64_t port { 0 };
 	char ipv4AddrStr[MAX_IPV4_ADDR_LEN];
-	char zkSeverList[ZK_SERVER_LIST_STR_LEN];
+	char zkServerList[ZK_SERVER_LIST_STR_LEN];
 
 	uint32_t iodCore[MAX_IOD_CORE];
 	uint32_t xnetCore[MAX_XNET_CORE];
@@ -67,24 +85,24 @@ typedef struct {
 	uint64_t queueMaxCapacity { 0 };
 } SA_ClusterControlCfg;
 
-SA_ClusterControlCfg g_saClusterControlCfg = { 0 };
+SA_ClusterControlCfg g_SaClusterControlCfg = { 0 };
 
 static void InitClusterCfg()
 {
 	int32_t i;
 	for (i = 0; i < MAX_IOD_CORE; i++) {
-		g_saClusterControlCfg.iodCore[i] = UINT32_MAX;
+		g_SaClusterControlCfg.iodCore[i] = UINT32_MAX;
 	}
 
 	for (i = 0; i < MAX_XNET_CORE; i++) {
-		g_saClusterControlCfg.xnetCore[i] = UINT32_MAX;
+		g_SaClusterControlCfg.xnetCore[i] = UINT32_MAX;
 	}
 
 	for (i =0; i < MAX_DPSHM_CORE; i++) {
-		g_saClusterControlCfg.dpshmCore[i] = UINT32_MAX;
+		g_SaClusterControlCfg.dpshmCore[i] = UINT32_MAX;
 	}
 
-	g_saClusterControlCfg.isUserOneSideRDMA = false;
+	g_SaClusterControlCfg.isUserOneSideRDMA = false;
 }
 
 static int32_t ConfigReadByLine(FILE *fptemp, uint8_t *buf, int32_t readLine)
@@ -133,7 +151,7 @@ static void ConfigTrim(uint8_t *str)
 
 static int32_t CheckIsOctal(uint8_t *ptemp)
 {
-	if ((*ptemp == '0') && (*(ptemp + 1) ! = 'x') && (*(ptemp + 1) ! = '\0')) {
+	if ((*ptemp == '0') && (*(ptemp + 1) ! = 'x') && (*(ptemp + 1) ! = 'X') && (*(ptemp + 1) ! = '\0')) {
 		return RETURN_OK;
 	}
 
@@ -156,21 +174,21 @@ static int32_t StringToIntByOctal(uint8_t *ptemp, int64_t *intValue)
 
 static int32_t CheckIsHexadecimal(uint8_t *ptemp)
 {
-	if ((*ptemp == '0') && (*(ptemp + 1) == 'x') || ((*ptemp == '0') && (*(ptemp + 1) == 'x'))) {
+	if (((*ptemp == '0') && (*(ptemp + 1) == 'x')) || ((*ptemp == '0') && (*(ptemp + 1) == 'X'))) {
 		return RETURN_OK;
 	}
 
 	return RETURN_ERROR;
 }
 
-static int32_t StringToIntByHexadecimal(uint8_t 8ptemp, int64_t *intValue)
+static int32_t StringToIntByHexadecimal(uint8_t *ptemp, int64_t *intValue)
 {
 	while (*ptemp != '\0') {
 		if (*ptemp >= 'a' && *ptemp <= 'f') {
 			*intValue = 16 * (*intValue) + *ptemp - 'a' + 10;
 		} else if (*ptemp >= 'A' && *ptemp <= 'F') {
 			*intValue = 16 * (*intValue) + *ptemp - 'A' + 10;
-		} else if (8ptemp >= '0' && *ptemp <='9') {
+		} else if (*ptemp >= '0' && *ptemp <='9') {
 			*intValue = 16 * (*intValue) + *ptemp - '0';
 		} else {
 			return RETURN_ERROR;
@@ -185,7 +203,7 @@ static int32_t StringToIntByHexadecimal(uint8_t 8ptemp, int64_t *intValue)
 static int32_t StringToIntByDecimal(uint8_t *ptemp, int64_t *intValue)
 {
 	while (*ptemp != '\0') {
-		if (*ptemp >- '0' && *ptemp <= '9') {
+		if (*ptemp >= '0' && *ptemp <= '9') {
 			*intValue = 10 * (*intValue) + *ptemp - '0';
 		} else {
 			return RETURN_ERROR;
@@ -223,6 +241,7 @@ static int32_t TransformValueToInt(uint8_t *pvalue, uint64_t *resultValue)
 			return RETURN_ERROR;
 		}
 	} else {
+
 		ret = StringToIntByDecimal(ptemp, &intValue);
 		if (ret != RETURN_OK){
 			return RETURN_ERROR;
@@ -243,6 +262,7 @@ static int32_t ParseCoreConfig(char *str, uint32_t *cores, uint8_t maxCoreNum)
 		uint64_t coreid = UINT64_MAX;
 		TransformValueToInt((uint8_t *)item, &coreid);
 		if (coreid > UINT8_MAX) {
+
 			return RETURN_ERROR;
 		}
 		cores[idx] = coreid;
@@ -258,6 +278,9 @@ static int32_t AnalyzeSubString(uint8_t *str)
 	value = SearchSubString(str, LOCAL_IPV4_ADDR);
 	if (value != NULL) {
 		ConfigTrim(value);
+
+
+
 		strcpy(g_SaClusterControlCfg.ipv4AddrStr, (char *)value);
 
 		return RETURN_OK;
@@ -266,48 +289,58 @@ static int32_t AnalyzeSubString(uint8_t *str)
 	value = SearchSubString(str, LOCAL_PORT);
 	if (value != NULL) {
 		ConfigTrim(value);
+
+
 		return TransformValueToInt(value, &g_SaClusterControlCfg.port);
 	}
 
 	value = SearchSubString(str, ZK_SERVER_LIST);
 	if (value != NULL) {
 		ConfigTrim(value);
+
 		strcpy(g_SaClusterControlCfg.zkServerList, (char *)value);
+
 		return RETURN_OK;
 	}
 
 	value = SearchSubString(str, IOD_CORE);
 	if (value != NULL) {
 		ConfigTrim(value);
+
 		return ParseCoreConfig((char *)value, g_SaClusterControlCfg.iodCore, MAX_IOD_CORE);
 	}
 
 	value = SearchSubString(str, XNET_CORE);
 	if (value != NULL) {
 		ConfigTrim(value);
+
                 return ParseCoreConfig((char *)value, g_SaClusterControlCfg.xnetCore, MAX_XNET_CORE);
 	}
 
 	value = SearchSubString(str, DPSHM_CORE);
 	if (value != NULL) {
 		ConfigTrim(value);
+
 		return ParseCoreConfig((char *)value, g_SaClusterControlCfg.dpshmCore, MAX_DPSHM_CORE);
 	}
 	
 	value = SearchSubString(str, GVA_SLAB_OBJ_NUM);
 	if (value != NULL) {
 		ConfigTrim(value);
+
 		return TransformValueToInt(value, &g_SaClusterControlCfg.gvaSlabObjNum);
 	}
 
 	value = SearchSubString(str, USE_ONE_SIDE_RMDA);
 	if (value != NULL) {
 		ConfigTrim(value);
+
 		return TransformValueToInt(value, &g_SaClusterControlCfg.isUserOneSideRDMA);
 	}
 	value = SearchSubString(str, LISTEN_IP);
 	if (value != NULL) {
 		ConfigTrim(value);
+
 		if (strlen((char *)value) >= MAX_IPV4_ADDR_LEN) {
 			return RETURN_ERROR;
 		}
@@ -317,82 +350,91 @@ static int32_t AnalyzeSubString(uint8_t *str)
 	value = SearchSubString(str, LISTEN_PORT);
 	if (value != NULL) {
 		ConfigTrim(value);
+
 		if (strlen((char *)value) >= MAX_PORT_SIZE) {
 			return RETURN_ERROR;
 		}
 		strcpy(g_SaClusterControlCfg.listenPort, (char *)value);
 		return RETURN_OK;
 	}
-
 	value = SearchSubString(str, SEND_IP);
 	if (value != NULL) {
 		ConfigTrim(value);
+
 		if (strlen((char *)value) >= MAX_IPV4_ADDR_LEN) {
 			return RETURN_ERROR;
 		}
 		strcpy(g_SaClusterControlCfg.sendIp, (char *)value);
 		return RETURN_OK;
 	}
-	
 	value = SearchSubString(str, SEND_PORT);
 	if (value != NULL) {
 		ConfigTrim(value);
+
 		if (strlen((char *)value) >= MAX_PORT_SIZE) {
 			return RETURN_ERROR;
 		}
 		strcpy(g_SaClusterControlCfg.sendPort, (char *)value);
 		return RETURN_OK;
 	}
-
 	value = SearchSubString(str, TEST_MODE);
 	if (value != NULL) {
 		ConfigTrim(value);
+
 		 if (strlen((char *)value) >= MAX_PORT_SIZE) {
 			 return RETURN_ERROR;
 		 }
 		 strcpy(g_SaClusterControlCfg.testMode, (char *)value);
 		 return RETURN_OK;
 	}       
-
 	value = SearchSubString(str, CORE_NUMBER);
 	if (value != NULL) {
 		ConfigTrim(value);
+
 		 if (strlen((char *)value) >= MAX_PORT_SIZE) {
 			 return RETURN_ERROR;
 		 }
 		 strcpy(g_SaClusterControlCfg.coreNumber, (char *)value);
 		 return RETURN_OK;
-	}       
 
+	}       
 	value = SearchSubString(str, QUEUE_AMOUNT);
 	if (value != NULL) {
 		ConfigTrim(value);
+
 		return TransformValueToInt(value, &g_SaClusterControlCfg.queueAmount);
 	}
-
 	value = SearchSubString(str, QUEUE_MAX_CAPACITY);
 	if (value != NULL) {
 		ConfigTrim(value);
+
 		return TransformValueToInt(value, &g_SaClusterControlCfg.queueMaxCapacity);
 	}
-
 	value = SearchSubString(str, MSGR_AMOUNT);
 	if (value != NULL) {
 		ConfigTrim(value);
+
 		return TransformValueToInt(value, &g_SaClusterControlCfg.msgrAmount);
 	}
-
 	value = SearchSubString(str, BIND_CORE);
 	if (value != NULL) {
 		ConfigTrim(value);
+
 		return TransformValueToInt(value, &g_SaClusterControlCfg.bindCore);
 	}
-
 	value = SearchSubString(str, BIND_QUEUE_CORE);
 	if (value != NULL) {
 		ConfigTrim(value);
+
 		return TransformValueToInt(value, &g_SaClusterControlCfg.bindQueueCore);
 	}
+
+
+
+
+
+
+
 
 	return RETURN_OK;
 }
@@ -405,6 +447,7 @@ static int32_t ReadConfig(const char *configFile)
 
 	pcfgFile = fopen(configFile, "r");
 	if (pcfgFile == NULL) {
+
 		fprintf(stderr, "config failed to open file: %s.", configFile);
 		return RETURN_ERROR;
 	}
@@ -413,12 +456,16 @@ static int32_t ReadConfig(const char *configFile)
 		memset(acBuf, 0, CONFIG_BUFFSIZE);
 		ret = ConfigReadByLine(pcfgFile, acBuf, CONFIG_BUFFSIZE);
 		if (ret != RETURN_OK) {
+
+
 			ret = RETURN_OK;
 			break;
 		}
 
+
 		ret = AnalyzeSubString(acBuf);
 		if (ret != RETURN_OK) {
+
 			fprintf(stderr,"config get config para failed(%s) str(%s).\n", configFile, (char *)acBuf);
 			break;
 		}
@@ -437,9 +484,11 @@ int32_t OsaConfigRead::CacheClusterConfigInit(const char *filepath)
 
 	ret = ReadConfig(filepath);
 	if (ret != RETURN_OK) {
+
 		fprintf(stderr, "read cluster config failed, ret %d.\n",ret);
 		return ret;
 	}
+
 
 	return RETURN_OK;
 }
@@ -478,32 +527,26 @@ char *OsaConfigRead::GetListenIp()
 {
 	return g_SaClusterControlCfg.listenIp;
 }
-
 char *OsaConfigRead::GetListenPort()
 {
 	return g_SaClusterControlCfg.listenPort;
 }
-
 char *OsaConfigRead::GetSendIp()
 {
 	return g_SaClusterControlCfg.sendIp;
 }
-
 char *OsaConfigRead::GetSendPort()
 {
 	return g_SaClusterControlCfg.sendPort;
 }
-
 char *OsaConfigRead::GetTestMode()
 {
 	return g_SaClusterControlCfg.testMode;
 }
-
 char *OsaConfigRead::GetCoreNumber()
 {
 	return g_SaClusterControlCfg.coreNumber;
 }
-
 uint32_t OsaConfigRead::GetQueueAmount()
 {
 	return g_SaClusterControlCfg.queueAmount;
@@ -513,7 +556,6 @@ uint32_t OsaConfigRead::GetMsgrAmount()
 {
 	return g_SaClusterControlCfg.msgrAmount;
 }
-
 uint32_t  OsaConfigRead::GetBindCore()
 {
 	return g_SaClusterControlCfg.bindCore;
@@ -554,11 +596,11 @@ int32_t OsaConfigRead::GetIodCore(uint32_t *cores, uint32_t maxCoreNum)
 	return CopyCores(cores, maxCoreNum, g_SaClusterControlCfg.iodCore, MAX_IOD_CORE);
 }
 
-
 int32_t OsaConfigRead::GetXnetCore(uint32_t *cores, uint32_t maxCoreNum)
 {
 	return CopyCores(cores, maxCoreNum, g_SaClusterControlCfg.xnetCore, MAX_XNET_CORE);
 }
+
 int32_t OsaConfigRead::GetDpshmCore(uint32_t *cores, uint32_t maxCoreNum)
 {
 	return CopyCores(cores, maxCoreNum, g_SaClusterControlCfg.dpshmCore, MAX_DPSHM_CORE);

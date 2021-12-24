@@ -32,8 +32,8 @@ bool SaClientDispatcher::ms_dispatch(Message *m)
 	    if (unlikely(dc % 65536) == 0) {
 		struct timespec ts;
 		clock_gettime(CLOCK_REALTIME_COARSE, &ts);
-		cerr << "Client CEPH_MSG_PING " << dc << "nanos: " << ts.tv_nsec + (ts.tv_sec * 1000000000) <<
-		       	"type=" << m->get_type() << std::endl;
+		cerr << "Client CEPH_MSG_PING " << dc << " nanos: " << ts.tv_nsec + (ts.tv_sec * 1000000000) <<
+		       	" type=" << m->get_type() << std::endl;
 		Salog(LV_DEBUG, LOG_TYPE, "CEPH_MSG_PING nanos:%ld", ts.tv_nsec+(ts.tv_sec*1000000000));
 	    }
 	    con->send_message(m);

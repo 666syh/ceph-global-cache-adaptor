@@ -1,3 +1,11 @@
+
+
+
+
+
+
+
+
 #include "include/types.h"
 #include "ClassHandler.h"
 #include "common/errno.h"
@@ -58,6 +66,7 @@ int ClassHandler::open_all_classes()
 	DIR *dir = ::opendir(CLASS_PATH);
 	if(!dir)
 		return -errno;
+
 	struct dirent *pde = nullptr;
 	int r = 0;
 	while ((pde = ::readdir(dir))){
@@ -150,7 +159,8 @@ int ClassHandler::_load_class(ClassData *cls)
 				r = -errno;
 				Salog(LV_DEBUG, LOG_TYPE, "could not stat class %s : %s", fname, cpp_strerror(r));
 			}else{
-			ldout(cct, 0) << "_load_class could not open class" << fname << " (dlopen failed): " << dlerror() << dendl;
+			ldout(cct, 0) << "_load_class could not open class" << fname << " (dlopen failed): " << dlerror() << 
+				dendl;
 			Salog(LV_DEBUG, LOG_TYPE, "could not open class %s : %s", fname, dlerror());
 			r = -EIO;
 			}
@@ -173,6 +183,7 @@ int ClassHandler::_load_class(ClassData *cls)
 		}
 	   }
         }
+
 	//resolve dependencies
 	set<ClassData *>::iterator p = cls->missing_dependencies.begin();
 	while(p != cls->missing_dependencies.end()){
@@ -182,6 +193,7 @@ int ClassHandler::_load_class(ClassData *cls)
 			cls->status = ClassData::CLASS_MISSING_DEPS;
 		return r;
 		}
+
 		ldout(cct, 10) << "_load_class " << cls->name << " satisfied dependency " << dc->name << dendl;
 		cls->missing_dependencies.erase(p++);
 	}
@@ -223,11 +235,11 @@ ClassHandler::ClassMethod *ClassHandler::ClassData::register_method(const char *
 {
 	/*no need for locking, called under the class_init mutex */
 	if(!flags){
-		lderr(handler->cct) << "register_method " << name << "." << mname << " flags" << flags << " " <<
+		lderr(handler->cct) << "register_method " << name << "." << mname << " flags " << flags << " " <<
 			(void *)func << " FAILED -- flags must be non-zero" << dendl;
 		return NULL;
 	}
-	ldout(handler->cct, 10) << "register_method " << name << "." << mname << " flags" << flags << " " <<
+	ldout(handler->cct, 10) << "register_method " << name << "." << mname << " flags " << flags << " " <<
 		(void *)func << dendl;
 	ClassMethod &method = methods_map[mname];
 	method.func = func;
@@ -240,7 +252,6 @@ ClassHandler::ClassMethod *ClassHandler::ClassData::register_method(const char *
 ClassHandler::ClassMethod *ClassHandler::ClassData::register_cxx_method(const char *mname, int flags,
 	cls_method_cxx_call_t func)
 {
-	
 	/*no need for locking, called under the class_init mutex */
 	ldout(handler->cct, 10) << "register_cxx_method " << name << "." << mname << " flags " << flags << " " <<
 		(void *)func << dendl;

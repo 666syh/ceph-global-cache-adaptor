@@ -48,7 +48,7 @@ void *ThreadClient(void *arg)
     return nullptr;
 }
 
-int NetworkModule::InitNetworkModule(const std::string &rAddr, const std::string &rPort,
+int NetworkModule::InitNetworkModule(const std::string &rAddr, const std::vector<std::string> &rPort,
 	       	const  std::string &sAddr, const std::string &sPort, int *bind)
 {
     Salog(LV_DEBUG, LOG_TYPE, "Init network module.");
@@ -57,7 +57,7 @@ int NetworkModule::InitNetworkModule(const std::string &rAddr, const std::string
         ptrMsgModule = new MsgModule();
     }
     recvAddr = rAddr;
-    recvPort = rPort;
+    vecPorts = rPort;
     sendAddr = sAddr;
     sednPort = sPort;
     bindSuccess = bind;
@@ -131,7 +131,7 @@ int NetworkModule::ThreadFuncBodyServer()
     pid_t pid = getpid();
     DummyAuthClientServer dummy_auth(g_ceph_context);
     for (auto &i : vecPorts) {
-	entity_addddr_t bind_addr;
+	entity_addr_t bind_addr;
 	string strPort = i;
 	Salog(LV_WARNING, LOG_TYPE, "Server messanger is starting...");
 
@@ -142,7 +142,7 @@ int NetworkModule::ThreadFuncBodyServer()
         entity_addr_from_url(&bind_addr, dest_str.c_str());
         Salog(LV_WARNING, LOG_TYPE, "Messenger type is %s", g_conf().get_val<std::string>("ms_type").c_str());
         // async+posix
-        serverMessenger = Messenger::create(g_ceph_context, g_conf().get_val<std::string>("ms_type"),
+        Messenger *svrMessenger = Messenger::create(g_ceph_context, g_conf().get_val<std::string>("ms_type"),
             entity_name_t::OSD(-1), "simple_server", 0 /*nonce */, 0 /* flags */);
 
         svrMessenger->set_auth_server(&dummy_auth);
@@ -157,14 +157,14 @@ int NetworkModule::ThreadFuncBodyServer()
 
 
         bind_addr.set_type(entity_addr_t::TYPE_MSGR2);
-        r = serverMessenger->bind(bind_addr);
+        r = svrMessenger->bind(bind_addr);
         if (r < 0) {
 	    Salog(LV_ERROR, LOG_TYPE, "bind error %s:%s", recvAddr.c_str(), strPort.c_str());
 	    *bindSuccess = 0;
             goto out;
 	}
 
-    	SaServerDispatcher *svrDispatcher = new SaServerDispatcher(serverMessenger, ptrMsgModule, this);
+    	SaServerDispatcher *svrDispatcher = new SaServerDispatcher(svrMessenger, ptrMsgModule, this);
 	svrDispatcher->ms_set_require_authorizer(false);
         svrMessenger->add_dispatcher_head(svrDispatcher);
         svrMessenger->start();
@@ -175,7 +175,7 @@ int NetworkModule::ThreadFuncBodyServer()
 
     if (bindMsgrCore) {
 	BindMsgrWorker(pid);
-	Salog(LV_WARNING, LOG_TYPE, "msgr-worker and ms_dispatcher bind cores.", pid);
+	Salog(LV_WARNING, LOG_TYPE, "msgr-worker and ms_dispatch bind cores.", pid);
     }
 
     if (!vecPorts.empty()) {
@@ -192,11 +192,11 @@ static int easy_readdir(const std::string &dir, std::set<std::string> *out)
 {
     DIR *h = ::opendir(dir.c_str());
     if (!h) {
-	retutn -errno;
+	return -errno;
     }
     struct dirent *de = nullptr;
     while ((de = ::readdir(h))) {
-	if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, ".") == 0) {
+	if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) {
 	    continue;
 	}
 	out->insert(de->d_name);
@@ -211,7 +211,7 @@ void NetworkModule::BindMsgrWorker(pid_t pid)
     char path[128] = {0};
     sprintf(path, "/proc/%d/task", pid);
     int r = easy_readdir(path, &ls);
-    Salog(LV_INFOMATION, LOG_TYPE, "path:%s ls_size=%d", path, ls.size());
+    Salog(LV_INFORMATION, LOG_TYPE, "path:%s ls_size=%d", path, ls.size());
     vector<uint64_t> vecBindMsgr;
     vector<uint64_t> vecBindDispatch;
     for (auto &i : ls) {
@@ -225,7 +225,7 @@ void NetworkModule::BindMsgrWorker(pid_t pid)
 	}
 	if (!feof(fp)) {
 	    char line[200] = {0};
-	    memset(line, sizeof(line));
+	    memset(line, "0", sizeof(line));
 	    fgets(line, sizeof(line) - 1, fp);
 	    string strLine = line;
 	    if (strLine.find("msgr-worker-") != string::npos) {
@@ -252,8 +252,8 @@ void NetworkModule::BindMsgrWorker(pid_t pid)
 	}
     }
     int n = 0;
-    uint32_t threadNum = msgrnum + vecPorts.size();
-    Salog(LV_INFOMATION, LOG_TYPE, "msgrNum=%d dispatcher=%d", msgrNum, vecPorts.size());
+    uint32_t threadNum = msgrNum + vecPorts.size();
+    Salog(LV_INFORMATION, LOG_TYPE, "msgrNum=%d dispatch=%d", msgrNum, vecPorts.size());
     for (auto &ii : bindThreads) {
 	BindCore(ii, threadNum);
 	n++;
@@ -271,7 +271,7 @@ void NetworkModule::BindCore(uint64_t ii, uint32_t n, bool isWorker)
     cpu_set_t mask;
     CPU_ZERO(&mask);
     int cpuNum = 0;
-    if (sWorker) {
+    if (isWorker) {
 	for (int i = 0; i < n; i++) {
 	    cpuNum =coreId[i % coreId.size()];
 	    Salog(LV_WARNING, LOG_TYPE, "isWorker %d cpuId=%d", ii, cpuNum);
@@ -279,12 +279,12 @@ void NetworkModule::BindCore(uint64_t ii, uint32_t n, bool isWorker)
 	}
     } else {
         cpuNum =coreId[n % coreId.size()];
-        Salog(LV_WARNING, LOG_TYPE, "isWorker %d cpuId=%d", ii, cpuNum);
+        Salog(LV_WARNING, LOG_TYPE, "isDispatch %d cpuId=%d", ii, cpuNum);
         CPU_SET(cpuNum, &mask);
     }
     pid_t tid = ii;
     if (sched_setaffinity(tid, sizeof(mask), &mask) == -1) {
-	 Salog(LV_ERROR, LOG_TYPE, "setaffinity failed %ld", ii);
+	 Salog(LV_ERROR, LOG_TYPE, "setaffinity failed");
 	 return;
     }
 
@@ -414,7 +414,7 @@ void *ThreadFunc(NetworkModule *arg, int threadNum, int coreId)
     return nullptr;
 }
 
-void NetworkModule::CreateWorkThread(uint32_t qnum, uint32_t portAmount, uint32_t qmaxcapacity)
+void NetworkModule::CreateWorkThread(uint32_t qnum, uint32_t portAmout, uint32_t qmaxcapacity)
 {
     finishThread.clear();
     opDispatcher.clear();
@@ -423,13 +423,13 @@ void NetworkModule::CreateWorkThread(uint32_t qnum, uint32_t portAmount, uint32_
     queueMaxCapacity = qmaxcapacity;
     vector<int> saCoreId;
     if (bindMsgrCore) {
-	if ((msgrNum + portAmount) >= coreid.size()) {
+	if ((msgrNum + portAmout) >= coreId.size()) {
    	    Salog(LV_WARNING, LOG_TYPE, "msgrNum=%d coreId.size=%d", msgrNum, coreId.size());
 	    saCoreId = coreId;
 	} else {
-	    for (int i = msgrNum + portAmount; i < coreid.size(); i++) {
-		Salog(LV_WARNING, LOG_TYPE, "push coreId[i]=%d" coreId[i]);
-		saCoreId,push_back(coreId[i]);
+	    for (int i = msgrNum + portAmout; i < coreId.size(); i++) {
+		Salog(LV_WARNING, LOG_TYPE, "push coreId[i]=%d", coreId[i]);
+		saCoreId.push_back(coreId[i]);
 	    }
 	}
     } else {
@@ -467,22 +467,22 @@ void NetworkModule::OpHandlerThread(int threadNum, int coreId)
 
 	Salog(LV_DEBUG, LOG_TYPE, "bind_gc_sa cpuId=%d", coreId);
         int cpus = sysconf(_SC_NPROCESSORS_CONF);
-        Salog(LV_ERROR, LOG_TYPE, "core affinity cpus=%d coreId=%d", cpus, coreId);
+        Salog(LV_WARNING, LOG_TYPE, "core affinity cpus=%d coreId=%d", cpus, coreId);
         cpu_set_t mask;
         CPU_ZERO(&mask);
         CPU_SET(coreId, &mask);
         if (sched_setaffinity(0, sizeof(mask), &mask) == -1) {
-            Salog(LV_ERROR, LOG_TYPE, "setaffinity failed");
+            Salog(LV_WARNING, LOG_TYPE, "setaffinity failed");
         }
         cpu_set_t getMask;
         CPU_ZERO(&getMask);
         if (sched_getaffinity(0, sizeof(getMask), &getMask) == -1) {
-            Salog(LV_ERROR, LOG_TYPE, "getaffinity failed");
+            Salog(LV_WARNING, LOG_TYPE, "getaffinity failed");
         }
 
         for (int i = 0; i < cpus; i++) {
             if (CPU_ISSET(i, &getMask)) {
-                Salog(LV_ERROR, LOG_TYPE, "this process %d of running processor: %d\n", getpid(), i);
+                Salog(LV_INFORMATION, LOG_TYPE, "this process %d of running processor: %d\n", getpid(), i);
 	    }
         }
     }
@@ -511,9 +511,9 @@ void NetworkModule::OpHandlerThread(int threadNum, int coreId)
 
 		uint64_t pts = periodTs.front();
 		periodTs.pop();
-		sa->FtdsEndHight(SA_FTDS_QUEUE_PERIOD, pts, 0);
+		sa->FtdsEndHigt(SA_FTDS_QUEUE_PERIOD, pts, 0);
 		uint64_t transTs = 0;
-		sa->FtdsStartHight(SA_FTDS_TRANS_OPREQ, transTs);
+		sa->FtdsStartHigh(SA_FTDS_TRANS_OPREQ, transTs);
                 SaOpReq *opreq = new SaOpReq;
                 opreq->opType = OBJECT_OP;
                 opreq->snapId = op->get_snapid();
@@ -544,7 +544,7 @@ void NetworkModule::OpHandlerThread(int threadNum, int coreId)
                         continue;
                     }
                 }
-		OptionsType optionsType = { 0 };
+		OptionsType optionType = { 0 };
                 for (auto &i : op->ops) {
                     OpRequestOps oneOp;
                     oneOp.objName = op->get_oid().name;
@@ -553,27 +553,27 @@ void NetworkModule::OpHandlerThread(int threadNum, int coreId)
                         oneOp.rbdObjId.head = strtoul(vecObj[vecObj.size() - 2], 0, 16);
                         oneOp.rbdObjId.sequence = strtoul(vecObj[vecObj.size() - 1], 0, 16);
                     }
-                    GetMsgModule()->ConvertClientopToOpreq(i, oneOp);
+                    GetMsgModule()->ConvertClientopToOpreq(i, oneOp, optionType);
                     opreq->vecOps.push_back(oneOp);
                     Salog(LV_DEBUG, LOG_TYPE, "isRbd=%d obj_name=%s head=%ld sequence=%ld ptid=%d", isRbd,
                         op->get_oid().name.c_str(), oneOp.rbdObjId.head, oneOp.rbdObjId.sequence, opreq->ptId);
                 }
 
-		if (unlikely(optionsType.write <= optionsType.read)) {
-			opreq->optionsType = GCACHE_READ;
+		if (unlikely(optionType.write <= optionType.read)) {
+			opreq->optionType = GCACHE_READ;
 		} else {
-			opreq->optionsType = GCACHE_WRITE;
+			opreq->optionType = GCACHE_WRITE;
 		}
 
-		sa->FtdsEndHight(SA_FTDS_TRANS_OPREQ, transTs, 0);
+		sa->FtdsEndHigt(SA_FTDS_TRANS_OPREQ, transTs, 0);
 		sa->DoOneOps(*opreq);
 
-		sa->FtdsEndHight(SA_FTDS_OP_LIFE, ts, 0);
+		sa->FtdsEndHigt(SA_FTDS_OP_LIFE, ts, 0);
             }
 	    uint64_t lockTsOne = 0;
-	    sa->FtdsStartHight(SA_FTDS_LOCK_ONE, lockTsOne);
+	    sa->FtdsStartHigh(SA_FTDS_LOCK_ONE, lockTsOne);
             opReqLock.lock();
-	    sa->FtdsEndHight(SA_FTDS_LOCK_ONE, lockTsOne, 0);
+	    sa->FtdsEndHigt(SA_FTDS_LOCK_ONE, lockTsOne, 0);
             continue;
         }
         opDispatch->condOpReq.wait(opReqLock);
@@ -585,26 +585,26 @@ uint32_t NetworkModule::EnqueueClientop(MOSDOp *opReq)
 {
     string source;
 #ifdef SA_PERF
-    msgrPerf->set_recv(opReq->osa_tick.SetRecvEnd(opReq, source));
+    msgPerf->set_recv(opReq->osa_tick.SetRecvEnd(opReq, source));
 #endif
     int ret = 0;
     uint64_t ts = 0;
-    sa->FtdsStartHight(SA_FTDS_OP_LIFE, ts);
+    sa->FtdsStartHigh(SA_FTDS_OP_LIFE, ts);
     uint64_t enqueTs = 0;
-    sa->FtdsStartHight(SA_FTDS_MOSDOP_ENQUEUE, enqueTs);
+    sa->FtdsStartHigh(SA_FTDS_MOSDOP_ENQUEUE, enqueTs);
 
     opReq->finish_decode();
     size_t idx = std::hash<std::string> {}(opReq->get_oid().name) % queueNum;
     std::unique_lock<std::mutex> opReqLock(opDispatcher[idx]->opQueueMutex);
     uint64_t periodTs = 0;
-    sa->FtdsStartHight(SA_FTDS_QUEUE_PERIOD, periodTs);
+    sa->FtdsStartHigh(SA_FTDS_QUEUE_PERIOD, periodTs);
     if (opDispatcher[idx]->GetSize() > queueMaxCapacity) {
         SalogLimit(LV_WARNING, LOG_TYPE, "%d queue_capacity_is_large. %d %d", idx, opDispatcher[idx]->GetSize());
         opDispatcher[idx]->cond.wait(opReqLock);
     }
     opDispatcher[idx]->EnQueue(opReq, ts, periodTs);
     Salog(LV_DEBUG, LOG_TYPE, "MOSDOp is in the queue.  vec_index=%ld", idx);
-    sa->FtdsEndHight(SA_FTDS_MOSDOP_ENQUEUE, enqueTs, 0);
+    sa->FtdsEndHigt(SA_FTDS_MOSDOP_ENQUEUE, enqueTs, 0);
     return ret;
 }
 
@@ -623,7 +623,7 @@ void FinishCacheOps(void *op, int32_t r)
     string source;
 #ifdef SA_PERF
     g_msgPerf->set_send(ptr->osa_tick.SetSendEnd(ptr, source));
-    g_msgPerf->set_Total((ptr->osa_tick.GetMsgLife(ptr));
+    g_msgPerf->set_Total(ptr->osa_tick.GetMsgLife(ptr));
 #endif
     ptr->put();
 }
@@ -726,4 +726,3 @@ void EncodeGetOpstat(uint64_t psize, time_t ptime, int i, MOSDOp *mosdop)
     encode(psize, mosdop->ops[i].outdata);
     encode(ptime, mosdop->ops[i].outdata);
 }
-

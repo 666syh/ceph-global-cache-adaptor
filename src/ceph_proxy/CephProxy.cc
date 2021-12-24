@@ -50,13 +50,13 @@ int CephProxy::Init(const std::string &cephConf,
 
     ret = RadosClientInit(&radosClient, std::string(ProxyGetCephConf()));
     if ( ret < 0) {
-	ProxyDbgLogErr("RadosClient Init failed: %d.", ret);
+	ProxyDbgLogErr("RadosClient Init failed: %d", ret);
 	return ret;
     }
 
     ret = ptable.Init();
     if ( ret != 0 ) {
-	ProxyDbgLogErr("PoolCtxTable Init failed: %d", ret);
+	ProxyDbgLogErr("PoolCtxTable Init failed: %d.", ret);
 	RadosClientShutdown(radosClient);
 	return ret;
     } 

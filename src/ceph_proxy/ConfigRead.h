@@ -5,12 +5,12 @@
 #include <stddef.h>
 #include <stdbool.h>
 
-#define MAX_IPV$_ADDR_LEN 16
+#define MAX_IPV4_ADDR_LEN 16
 #define MAX_IOD_CORE 8
 #define MAX_PORT_SIZE 10
 #define MAX_XNET_CORE 4
 #define MAX_DPSHM_CORE 8
-#define ZK_SERCER_LIST_STR_LEN 128
+#define ZK_SERVER_LIST_STR_LEN 128
 #define MAX_PATH_LEN 128
 #define MAX_CORE_NUMBER 128
 

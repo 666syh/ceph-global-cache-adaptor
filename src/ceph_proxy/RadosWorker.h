@@ -128,7 +128,7 @@ public:
 
 	int status = pthread_join(threadId, prval);
 	if (status != 0) {
-	    ProxyDbgLogErr("Thread::Join: pthread_Join failed with error: %d", status);
+	    ProxyDbgLogErr("Thread::Join: pthread_jon failed with error: %d", status);
 	}
 	threadId = 0;
 	return status;
@@ -152,7 +152,7 @@ public:
     }
 
     bool AmSelf() {
-	return (pthread self() == threadId);
+	return (pthread_self() == threadId);
     }
 };
 
@@ -246,7 +246,7 @@ public:
 	ioworkerEmptyWait = false;
     }
 
-    int32_t Queue(rados_ioctx_t ioctx, ceph_proxy_op_t op, completion_t c);
+    int32_t Queue(ceph_proxy_op_t op, completion_t c);
     void *OpHandler();
 };
 
@@ -263,7 +263,7 @@ public:
 	proxy = nullptr;
     }
 
-    void Start(std::vector<uint32_t> cpuIDs {
+    void Start(std::vector<uint32_t> cpuIDs) {
 	ioWorkers.clear();
     }
 
@@ -279,17 +279,17 @@ public:
     }
     
     RadosIOWorker *GetIOWorker(int64_t poolId) {
-        std::shared_lock<std::shared_mutex> lock(ioworkersLocks);
+        std::shared_lock<std::shared_mutex> lock(ioworkersLock);
 	auto radosIOWorkerIter = ioWorkers.find(poolId);
 	if (radosIOWorkerIter != ioWorkers.end()) {
 	    return radosIOWorkerIter->second;
 	}
 
-	retutn nullptr;
+	return nullptr;
     }
 
     RadosIOWorker *CreateIOWorker(int64_t poolId) {
-        std::unique_lock<std::shared_mutex> lock(ioworkersLocks);
+        std::unique_lock<std::shared_mutex> lock(ioworkersLock);
 	auto radosIOWorkerIter = ioWorkers.find(poolId);
 	if (radosIOWorkerIter != ioWorkers.end()) {
 	    return radosIOWorkerIter->second;
@@ -309,7 +309,7 @@ public:
     int32_t Queue(ceph_proxy_op_t op, completion_t c) {
 	RadosObjectOperation *operation = reinterpret_cast<RadosObjectOperation *>(op);
 	if (operation->poolId < 0) {
-	    ProxyDbgLogErr("invalid poolId: %d", operation->poolId);
+	    ProxyDbgLogErr("invalid poolId: %ld", operation->poolId);
 	    return -1;
 	}
 

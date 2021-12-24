@@ -14,7 +14,7 @@
 
 
 
-#ifdef MSG_PERF_RECORD_H
+#ifndef MSG_PERF_RECORD_H
 #define MSG_PERF_RECORD_H
 
 #include <stdint.h>
@@ -72,19 +72,9 @@ public:
 
     std::function<void()> write_perf_log();
 
-    void strat();
+    void start();
     void stop();
 };
 
 
 #endif
-
-
-
-
-
-
-
-
-
-

@@ -1,3 +1,9 @@
+
+
+
+
+
+
 #ifndef CLIENT_OP_QUEUE_H
 #define CLIENT_OP_QUEUE_H
 #include <queue>
@@ -30,7 +36,7 @@ public:
 
     size_t GetSize()
     {
-	return reQueue.size();
+	return reqQueue.size();
     }
 
     std::condition_variable condOpReq;

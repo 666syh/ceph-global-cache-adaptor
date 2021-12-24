@@ -17,7 +17,7 @@ int CephProxyInit(const char *conf, size_t wNum, const char *log,
     CephProxy *cephProxy = CephProxy::GetProxy();
     ret = cephProxy->Init(config, logPath, wNum);
     if (ret < 0) {
-	ProxyDbgLogErr("CephProxy Init failed: %d", ret);
+	ProxyDbgLogErr("CephProxy Inif failed: %d", ret);
 	*proxy = nullptr;
 	return ret;
     }
@@ -34,10 +34,10 @@ void CephProxyShutdown(ceph_proxy_t proxy)
     proxy = nullptr;
 }
 
-void CephProxyQueueOp(ceph_proxy_t proxy,rados_ioctx_t ioctx, ceph_proxy_op_t op, completion_t c)
+int32_t CephProxyQueueOp(ceph_proxy_t proxy, ceph_proxy_op_t op, completion_t c)
 {
-	CephProxy *cephProxy = reinterpret_cast<CephProxy*>(proxy);
-	cephProxy->Enqueue(ioctx, op, c);
+    CephProxy *cephProxy = reinterpret_cast<CephProxy*>(proxy);
+    return cephProxy->Enqueue(op, c);
 }
 
 rados_ioctx_t CephProxyGetIoCtx(ceph_proxy_t proxy, const char *poolname)
@@ -58,7 +58,7 @@ int64_t CephProxyGetPoolIdByPoolName(ceph_proxy_t proxy, const char *poolName)
 	return cephProxy->GetPoolIdByPoolName(poolName);
 }
 
-int64_t CephProxyGetPoolNameByPoolId(ceph_proxy_t proxy, int64_t poolId, char *buf, unsigned maxLen)
+int CephProxyGetPoolNameByPoolId(ceph_proxy_t proxy, int64_t poolId, char *buf, unsigned maxLen)
 {
 	CephProxy *cephProxy = reinterpret_cast<CephProxy *>(proxy);
 	return cephProxy->GetPoolNameByPoolId(poolId, buf, maxLen);
@@ -70,7 +70,7 @@ int64_t CephProxyGetPoolIdByCtx(ceph_proxy_t proxy, rados_ioctx_t ioctx)
 	return cephProxy->GetPoolIdByCtx(ioctx);
 }
 
-int64_t CephProxyGetMinAllocSize(ceph_proxy_t proxy, uint32_t *minAllocSize, CEPH_BDEV_TYPE_E type)
+int CephProxyGetMinAllocSize(ceph_proxy_t proxy, uint32_t *minAllocSize, CEPH_BDEV_TYPE_E type)
 {
 	CephProxy *cephProxy = reinterpret_cast<CephProxy *>(proxy);
 	return cephProxy->GetMinAllocSize(minAllocSize, type);
@@ -137,7 +137,7 @@ void CephProxyWriteOpCmpXattr(ceph_proxy_op_t op,  const char *name,
 }
 
 void CephProxyWriteOpOmapCmp(ceph_proxy_op_t op, const char *key, uint8_t compOperator, 
-				constchar *value, size_t valLen, int *prval)
+				const char *value, size_t valLen, int *prval)
 {
 	RadosWriteOpOmapCmp(op, key, compOperator, value, valLen, prval);
 }
@@ -246,7 +246,7 @@ int CephProxyReadOpInit2(ceph_proxy_op_t *op, const int64_t poolId, const char* 
 {
 	*op = RadosReadOpInit2(poolId, oid);
 	if (*op == nullptr) {
-		ProxyDbgLogErr("Create ReadOp failed.");
+		ProxyDbgLogErr("Create Read Op failed.");
 		return -1;
 	}
 
@@ -280,7 +280,7 @@ void CephProxyReadOpCmpext(ceph_proxy_op_t op, const char *cmpBuf,
 }
 
 void CephProxyReadOpCmpXattr(ceph_proxy_op_t op,  const char *name, 
-		uint8_t compOperator, const char *value, size_t valLen)
+		uint8_t compOperator, const char *value, size_t valueLenn)
 {
 	RadosReadOpCmpXattr(op, name, compOperator, value, valueLen);
 }
@@ -315,13 +315,12 @@ void CephProxyReadOpReadSGL(ceph_proxy_op_t op, uint64_t offset, size_t len, SGL
 void CephProxyReadOpCheckSum(ceph_proxy_op_t op, proxy_checksum_type_t type, 
 			const char *initValue, size_t initValueLen, 
 			uint64_t offset, size_t len, size_t chunkSize, char *pCheckSum,
-		       	size_t checkSumLen, int *prval) 
+		       	size_t CheckSumLen, int *prval) 
 {
-	RadosReadOpCheckSum(op ,type,  initValue, initValueLen, offset, len, chunkSize, pCheckSum, checkSumLen, prval);
+	RadosReadOpCheckSum(op ,type,  initValue, initValueLen, offset, len, chunkSize, pCheckSum, CheckSumLen, prval);
 }
 
-completion_t CephProxyCreateCompletion(CallBack_t fn, void *arg)
-{
+completion_t CephProxyCreateCompletion(CallBack_t fn, void *arg) {
 	return CompletionInit(fn, arg);
 }
 

@@ -1,9 +1,18 @@
+
+
+
+
+
+
+
+
 #ifndef CEPH_CLASSHANDLER_H
 #define CEPH_CLASSHANDLER_H
 
 #include "include/types.h"
 #include "objclass/objclass.h"
 #include "common/Mutex.h"
+
 
 class CephContext;
 
@@ -28,6 +37,7 @@ public:
 		std::lock_guard l(cls->handler->mutex);
 		return flags;
 	}
+
 	ClassMethod() : cls(0), flags(0), func(0), cxx_func(0) {}
     };
 
@@ -116,5 +126,6 @@ public:
 
 	void shutdown();
 };
+
 
 #endif

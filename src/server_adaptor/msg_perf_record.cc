@@ -60,7 +60,7 @@ std::function<void()> MsgPerfRecord::write_perf_log()
 	    (1 + ltm->tm_mon), ltm->tm_mday, ltm->tm_hour, ltm->tm_min, ltm->tm_sec);
 
 	outfile.open(fileName, ios::out | ios::app);
-	outfile << "***************str**************" << std::endl;
+	outfile << "***************start**************" << std::endl;
 	while (!finish) {
 	    sleep(3);
 	    if (msgRecvCountPre == msgRecvCount && msgSendCountPre == msgSendCount &&
@@ -75,9 +75,9 @@ std::function<void()> MsgPerfRecord::write_perf_log()
 	    char curTime[SHORT_BUFF_LEN] = { 0 };
 	    sprintf(curTime, "%02d:%02d:%02d", writeTimeTm->tm_hour, writeTimeTm->tm_min, writeTimeTm->tm_sec);
 	    outfile << curTime << " *********************************************" << std::endl;
-	    outfile << "msgRecvCount = " << msgRecvCount << setw(16) << "  avg_recv_lat = " << msgRecvTinc / msgRecvCount << std::endl;
-	    outfile << "msgSendCount = " << msgSendCount << setw(16) << "  avg_send_lat = " << msgSendTinc / msgSendCount << std::endl;
-	    outfile << "msgTotalCount = " << msgTotalCount << setw(16) << "  avg_Total_lat = " << msgTotalTinc / msgTotalCount << std::endl;
+	    outfile << "msgRecvCount = " << msgRecvCount << setw(16) << "   avg_recv_lat = " << msgRecvTinc / msgRecvCount << std::endl;
+	    outfile << "msgSendCount = " << msgSendCount << setw(16) << "   avg_send_lat = " << msgSendTinc / msgSendCount << std::endl;
+	    outfile << "msgTotalCount = " << msgTotalCount << setw(16) << "  avg_total_lat = " << msgTotalTinc / msgTotalCount << std::endl;
 	}
 	outfile << "****************finish********************" << std::endl;
 	outfile.close();
@@ -97,21 +97,3 @@ void MsgPerfRecord::stop()
         i.join();
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

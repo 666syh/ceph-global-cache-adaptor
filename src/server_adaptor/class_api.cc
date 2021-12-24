@@ -1,4 +1,12 @@
-#include "common/config.h"
+
+
+
+
+
+
+
+
+#include "mmon/config.h"
 #include "common/debug.h"
 
 #include "objclass/objclass.h"
@@ -105,7 +113,7 @@ int cls_getxattr(cls_method_context_t hctx, const char *name, char **outdata, in
 	opreq.vecOps.push_back(op);
 	r = pctx->cbFunc(&opreq);
 	ops.swap(ptr->ops);
-	if (r < 0);
+	if (r < 0)
 		return r;
 
 	*outdata = (char *)malloc(ops[0].outdata.length());
@@ -132,7 +140,7 @@ int cls_setxattr(cls_method_context_t hctx, const char *name, const char *value,
 
 	opreq.vecOps.clear();
 	opreq.vecOps.push_back(op);
-	return pctx->cb_func(&opreq);
+	return pctx->cbFunc(&opreq);
 }
 
 int cls_get_request_origin(cls_method_context_t hctx, entity_inst_t *origin)
@@ -189,7 +197,7 @@ int cls_cxx_remove(cls_method_context_t hctx)
 
 	opreq.vecOps.clear();
 	opreq.vecOps.push_back(op);
-	return pctx->cb_func(&opreq);
+	return pctx->cbFunc(&opreq);
 }
 
 int cls_cxx_stat(cls_method_context_t hctx, uint64_t *size, time_t *mtime)
@@ -210,7 +218,7 @@ int cls_cxx_stat(cls_method_context_t hctx, uint64_t *size, time_t *mtime)
 	opreq.vecOps.push_back(op);
 	r = pctx->cbFunc(&opreq);
 	ops.swap(ptr->ops);
-	if( < 0)
+	if(r < 0)
 		return r;
 
 	auto iter = ops[0].outdata.cbegin();
@@ -249,6 +257,7 @@ int cls_cxx_stat2(cls_method_context_t hctx, uint64_t *size, ceph::real_time *mt
 	ops.swap(ptr->ops);
 	if(r < 0)
 		return r;
+
 	auto iter = ops[0].outdata.cbegin();
 	real_time ut;
 	uint64_t s;
@@ -270,7 +279,8 @@ int cls_cxx_read(cls_method_context_t hctx, int ofs, int len, bufferlist *outbl)
 	return cls_cxx_read2(hctx, ofs, len, outbl, 0);
 }
 
-int cls_cxx_read2(cls_method_context_t hctx, int ofs, int len, bufferlist *outbl, uint32_t op_flags)
+int cls_cxx_read2(cls_method_context_t hctx, int ofs, int len, 
+		bufferlist *outbl, uint32_t op_flags)
 {
 	SaOpContext *pctx = reinterpret_cast<SaOpContext *>(hctx);
 	SaOpReq *pOpReq = pctx->opReq;
@@ -294,6 +304,7 @@ int cls_cxx_read2(cls_method_context_t hctx, int ofs, int len, bufferlist *outbl
 	ops.swap(ptr->ops);
 	if(r < 0)
 		return r;
+
 	outbl->claim(ops[0].outdata);
 	return outbl->length();
 }
@@ -319,7 +330,7 @@ int cls_cxx_write2(cls_method_context_t hctx, int ofs, int len, bufferlist *inbl
 	op.inDataLen = inbl->length();
 
 	opreq.vecOps.clear();
-	opreq.vecOPs.push_back(op);
+	opreq.vecOps.push_back(op);
 	return pctx->cbFunc(&opreq);
 }
 
@@ -334,12 +345,12 @@ int cls_cxx_write_full(cls_method_context_t hctx, bufferlist *inbl)
 	op.opSubType = CEPH_OSD_OP_WRITEFULL;
 	op.objName = ptr->get_oid().name;
 	op.objOffset = 0;
-	op.objLength = inbl->Length;
+	op.objLength = inbl->length();
 	op.inData = inbl->c_str();
 	op.inDataLen = inbl->length();
 
 	opreq.vecOps.clear();
-	opreq.vecOPs.push_back(op);
+	opreq.vecOps.push_back(op);
 	return pctx->cbFunc(&opreq);
 }
 
@@ -360,7 +371,7 @@ int cls_cxx_getxattr(cls_method_context_t hctx, const char *name, bufferlist *ou
 	ops.swap(ptr->ops);
 	opreq.vecOps.clear();
 	opreq.vecOps.push_back(op);
-	r = pctx->cb_func(&opreq);
+	r = pctx->cbFunc(&opreq);
 	ops.swap(ptr->ops);
 	if(r < 0)
 		return r;
@@ -385,7 +396,7 @@ int cls_cxx_getxattrs(cls_method_context_t hctx, map<string, bufferlist> *attrse
 	ops.swap(ptr->ops);
 	opreq.vecOps.clear();
 	opreq.vecOps.push_back(op);
-	r = pctx->cb_func(&opreq);
+	r = pctx->cbFunc(&opreq);
 	ops.swap(ptr->ops);
 	if( r < 0)
 		return r;
@@ -406,7 +417,6 @@ int cls_cxx_setxattr(cls_method_context_t hctx, const char *name, bufferlist *in
 	SaOpReq opreq = *pOpReq;
 	MOSDOp *ptr = reinterpret_cast<MOSDOp *>(pOpReq->ptrMosdop);
 	OpRequestOps op;
-	int r;
 	
 	op.opSubType = CEPH_OSD_OP_SETXATTR;
 	op.objName = ptr->get_oid().name;
@@ -418,7 +428,7 @@ int cls_cxx_setxattr(cls_method_context_t hctx, const char *name, bufferlist *in
 
 	opreq.vecOps.clear();
 	opreq.vecOps.push_back(op);
-	return pctx->cb_func(&opreq);
+	return pctx->cbFunc(&opreq);
 }
 
 int cls_cxx_map_get_all_vals(cls_method_context_t hctx, map<string, bufferlist> *vals, bool *more)
@@ -445,7 +455,7 @@ int cls_cxx_map_get_all_vals(cls_method_context_t hctx, map<string, bufferlist> 
 	ops.swap(ptr->ops);
 	opreq.vecOps.clear();
 	opreq.vecOps.push_back(op);
-	r = pctx->cb_func(&opreq);
+	r = pctx->cbFunc(&opreq);
 	ops.swap(ptr->ops);
 	if( r < 0)
 		return r;
@@ -469,25 +479,22 @@ int cls_cxx_map_get_keys(cls_method_context_t hctx, const string &start_obj, uin
 	MOSDOp *ptr = reinterpret_cast<MOSDOp *>(pOpReq->ptrMosdop);
 	OpRequestOps op;
 	int r;
-	op.opSubType = CEPH_OSD_OP_OMAPGETVALS;
+	op.opSubType = CEPH_OSD_OP_OMAPGETKEYS;
 	op.objName = ptr->get_oid().name;
 	op.keys.push_back("start_after");
-	op.values.push_back(string(""));
+	op.values.push_back(start_obj);
 
 	op.keys.push_back("max_return");
 	op.values.push_back(to_string(max_to_get));
-
-	op.keys.push_back("filter_prefix");
-	op.values.push_back(string(""));
 
 	vector<OSDOp> ops(1);
 	ops.swap(ptr->ops);
 	opreq.vecOps.clear();
 	opreq.vecOps.push_back(op);
-	r = pctx->cb_func(&opreq);
+	r = pctx->cbFunc(&opreq);
 	ops.swap(ptr->ops);
 	if( r < 0)
-		return ret;
+		return r;
 
 	auto iter = ops[0].outdata.cbegin();
 	try{
@@ -524,7 +531,7 @@ int cls_cxx_map_get_vals(cls_method_context_t hctx, const string &start_obj, con
 	ops.swap(ptr->ops);
 	opreq.vecOps.clear();
 	opreq.vecOps.push_back(op);
-	r = pctx->cb_func(&opreq);
+	r = pctx->cbFunc(&opreq);
 	ops.swap(ptr->ops);
 	if( r < 0)
 		return r;
@@ -621,7 +628,7 @@ int cls_cxx_map_set_val(cls_method_context_t hctx, const string &key, bufferlist
 	
 	opreq.vecOps.clear();
 	opreq.vecOps.push_back(op);
-	return  pctx->cb_func(&opreq);
+	return  pctx->cbFunc(&opreq);
 }
 
 int cls_cxx_map_set_vals(cls_method_context_t hctx, const std::map<string, bufferlist> *map)
@@ -735,6 +742,7 @@ uint64_t cls_current_version(cls_method_context_t hctx)
 	return 0;
 }
 
+
 int cls_current_subop_num(cls_method_context_t hctx)
 {
 	SaOpContext *pctx = reinterpret_cast<SaOpContext *>(hctx);
@@ -752,7 +760,7 @@ int cls_log(int level, const char *format, ...)
 		va_end(ap);
 #define MAX_SIZE 8196
 		if((n > -1 && n < size) || size > MAX_SIZE){
-			Salog(level, LOG_TYPE, "%s", buf);
+			Salog(LV_DEBUG, LOG_TYPE, "%s", buf);
 			return n;
 		}
 		size *=2;

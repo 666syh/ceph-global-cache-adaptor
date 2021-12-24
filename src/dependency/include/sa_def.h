@@ -52,7 +52,7 @@ struct RbdObjid {
     char rbdd[4];
     uint64_t head { 0 };
     uint64_t sequence { 0 };
-} __attribue__((packed, aligned(4)));
+} __attribute__((packed, aligned(4)));
 
 struct OpRequestOps {
     uint64_t opSubType {0};
@@ -91,7 +91,7 @@ struct SaOpReq {
 
     uint64_t snapId { 0 };
 
-    uint64_t opSequence { 0 };
+    uint64_t opsSequence { 0 };
     void *ptrMosdop { nullptr };
 
     uint32_t ptId { 0 };
@@ -107,7 +107,7 @@ struct SaOpReq {
 	optionType = other.optionType;
 	opType = other.opType;
 	snapId = other.snapId;
-	opSequence = other.opSequence;
+	opsSequence = other.opsSequence;
 	ptrMosdop = other.ptrMosdop;
 	ptId = other.ptId;
 	poolId = other.poolId;
@@ -120,7 +120,7 @@ struct SaOpReq {
         optionType=other.optionType;
 	opType=other.opType;
 	snapId=other.snapId;
-	opSequence=other.opSequence;
+	opsSequence=other.opsSequence;
 	ptrMosdop=other.ptrMosdop;
 	ptId=other.ptId;
 	poolId=other.poolId;
@@ -149,7 +149,7 @@ struct SaBatchKv {
 };
 
 struct SaKeyValue {
-    uint32_t keln;
+    uint32_t klen;
     char *kbuf;
     uint32_t vlen;
     char *vbuf;

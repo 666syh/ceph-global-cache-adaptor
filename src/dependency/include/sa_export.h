@@ -42,7 +42,7 @@ public :
     void FtdsStartNormal(unsigned int id, uint64_t ts);
     void FtdsEndNormal(unsigned int id, uint64_t ts, int ret);
     void FtdsStartHigh(unsigned int id, uint64_t ts);
-    void FtdsEndHigh(unsigned int id, uint64_t ts, int ret);
+    void FtdsEndHigt(unsigned int id, uint64_t ts, int ret);
 };
 
 #endif

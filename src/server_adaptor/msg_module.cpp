@@ -1,4 +1,5 @@
 /*
+ *
  * Copyright (c) Huawei Technologies Co., Ltd. 2021-2021. All rights reserved.
  * Description: Process many messages.
  */
@@ -35,7 +36,7 @@ static void decode_str_str_map_to_bl(bufferlist::const_iterator &p, bufferlist *
     start.copy(len, *out);
 }
 
-int MsgModule::ConvertClientopToOpreq(OSDOp &clientop, OpRequestOps &oneOp)
+int MsgModule::ConvertClientopToOpreq(OSDOp &clientop, OpRequestOps &oneOp, OptionsType &optionsType)
 {
     int ret = 0;
     oneOp.opSubType = clientop.op.op;
@@ -43,19 +44,21 @@ int MsgModule::ConvertClientopToOpreq(OSDOp &clientop, OpRequestOps &oneOp)
     switch (oneOp.opSubType) {
         case CEPH_OSD_OP_SPARSE_READ:
         case CEPH_OSD_OP_SYNC_READ:
-        case CEPH_OSD_OP_READ:
+        case CEPH_OSD_OP_READ: {
 	    optionType.read++;
 	    oneOp.objOffset = clientop.op.extent.offset;
 	    oneOp.objLength = clientop.op.extent.length;
-	    Salog(LV_DEBUG, LOG_TYPE, "ConvertClientopToOpreq READ obj=%s type=0x%1X offset=0x%X length=0x%X",
+	    Salog(LV_DEBUG, LOG_TYPE, "ConvertClientopToOpreq READ obj=%s type=0x%lX offset=0x%X length=0x%X",
 		oneOp.objName.c_str(), oneOp.opSubType, oneOp.objOffset, oneOp.objLength);
 	    ConvertObjRw(clientop, oneOp);
     	} break;
         case CEPH_OSD_OP_WRITEFULL:
         case CEPH_OSD_OP_WRITE: {
+	    optionType.write++;					
             oneOp.objOffset = clientop.op.extent.offset;
             oneOp.objLength = clientop.op.extent.length;
-            Salog(LV_DEBUG, LOG_TYPE, "ConvertClientopToOpreq READ/WRITE/CEPH_OSD_OP_WRITEFULL obj=%s type=0x%lX offset=0x%X length=0x%X",
+            Salog(LV_DEBUG, LOG_TYPE, 
+		"ConvertClientopToOpreq WRITE/CEPH_OSD_OP_WRITEFULL obj=%s type=0x%lX offset=0x%X length=0x%X",
                 oneOp.objName.c_str(), oneOp.opSubType, oneOp.objOffset, oneOp.objLength);
             ConvertObjRw(clientop, oneOp);
         } break;
@@ -228,8 +231,7 @@ void MsgModule::ConvertAttrOp(OSDOp &clientop, OpRequestOps &oneOp)
         oneOp.values.push_back(val);
     } else if (op.op == CEPH_OSD_OP_CMPXATTR) {
         oneOp.subops.push_back((int)op.xattr.cmp_op);
-        oneOp.cmp_modes.push_back(op.xattr.cmp_mode);
-
+        oneOp.cmpModes.push_back(op.xattr.cmp_mode);
         switch (op.xattr.cmp_mode) {
             case CEPH_OSD_CMPXATTR_MODE_STRING: {
                 string val;
@@ -245,4 +247,3 @@ void MsgModule::ConvertAttrOp(OSDOp &clientop, OpRequestOps &oneOp)
         }
     }
 }
-

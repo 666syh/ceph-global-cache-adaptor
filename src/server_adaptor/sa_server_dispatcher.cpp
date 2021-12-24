@@ -45,7 +45,7 @@ bool SaServerDispatcher::ms_dispatch(Message *m)
        } break;
        case CEPH_MSG_OSD_OP: {
 	    MOSDOp *osdOp = static_cast<MOSDOp *>(m);
-	    Salog(LV_DEVBUG, LOG_TYPE, "Eecive MOSDOp, prepare to enqueue.");
+	    Salog(LV_DEBUG, LOG_TYPE, "Recive MOSDOp, prepare to enqueue.");
 	    ptrNetworkModule->EnqueueClientop(osdOp);
 	} break;
        default: {

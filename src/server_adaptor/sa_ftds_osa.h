@@ -14,7 +14,7 @@
 
 
 
-#ifdef SA_FTDS_H
+#ifndef SA_FTDS_H
 #define SA_FTDS_H
 
 
