@@ -61,19 +61,19 @@
 #else
 
 #define ProxyDbgCrit(fmt, ...)                    \
-	fprintf(stderr, "[%s][%d][%s][CRI][PROXY][" fmt "]\n", __FILE__, __LINE__, __FUNCTION__, ##__VA_ARGS__);	
+	fprintf(stderr, "[%s][%d][%s][CRI][PROXY][" fmt "]\n", __FILE__, __LINE__, __FUNCTION__, ##__VA_ARGS__)
 
 #define ProxyDbgLogErrR(fmt, ...)                    \
-	fprintf(stderr, "[%s][%d][%s][Err][PROXY][" fmt "]\n", __FILE__, __LINE__, __FUNCTION__, ##__VA_ARGS__);	
+	fprintf(stderr, "[%s][%d][%s][Err][PROXY][" fmt "]\n", __FILE__, __LINE__, __FUNCTION__, ##__VA_ARGS__)
 
 #define ProxyDbgLogWarn(fmt, ...)                    \
-	fprintf(stderr, "[%s][%d][%s][Warn][PROXY][" fmt "]\n", __FILE__, __LINE__, __FUNCTION__, ##__VA_ARGS__);	
+	fprintf(stderr, "[%s][%d][%s][Warn][PROXY][" fmt "]\n", __FILE__, __LINE__, __FUNCTION__, ##__VA_ARGS__)
 
 #define ProxyDbgLogInfo(fmt, ...)                    \
-	fprintf(stderr, "[%s][%d][%s][Info][PROXY][" fmt "]\n", __FILE__, __LINE__, __FUNCTION__, ##__VA_ARGS__);	
+	fprintf(stderr, "[%s][%d][%s][Info][PROXY][" fmt "]\n", __FILE__, __LINE__, __FUNCTION__, ##__VA_ARGS__)
 
 #define ProxyDbgLogDebug(fmt, ...)                    \
-	fprintf(stderr, "[%s][%d][%s][Debug][PROXY][" fmt "]\n", __FILE__, __LINE__, __FUNCTION__, ##__VA_ARGS__);	
+	fprintf(stderr, "[%s][%d][%s][Debug][PROXY][" fmt "]\n", __FILE__, __LINE__, __FUNCTION__, ##__VA_ARGS__)
 
 #endif
 

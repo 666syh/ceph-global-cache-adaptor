@@ -280,7 +280,7 @@ void CephProxyReadOpCmpext(ceph_proxy_op_t op, const char *cmpBuf,
 }
 
 void CephProxyReadOpCmpXattr(ceph_proxy_op_t op,  const char *name, 
-		uint8_t compOperator, const char *value, size_t valueLenn)
+		uint8_t compOperator, const char *value, size_t valueLen)
 {
 	RadosReadOpCmpXattr(op, name, compOperator, value, valueLen);
 }
