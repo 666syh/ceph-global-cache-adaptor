@@ -225,7 +225,7 @@ void NetworkModule::BindMsgrWorker(pid_t pid)
 	}
 	if (!feof(fp)) {
 	    char line[200] = {0};
-	    memset(line, "0", sizeof(line));
+	    memset(line, 0, sizeof(line));
 	    fgets(line, sizeof(line) - 1, fp);
 	    string strLine = line;
 	    if (strLine.find("msgr-worker-") != string::npos) {
@@ -284,14 +284,14 @@ void NetworkModule::BindCore(uint64_t ii, uint32_t n, bool isWorker)
     }
     pid_t tid = ii;
     if (sched_setaffinity(tid, sizeof(mask), &mask) == -1) {
-	 Salog(LV_ERROR, LOG_TYPE, "setaffinity failed");
+	 Salog(LV_ERROR, LOG_TYPE, "setaffinity failed %ld", ii);
 	 return;
     }
 
     cpu_set_t getMask;
     CPU_ZERO(&getMask);
     if (sched_getaffinity(tid, sizeof(getMask), &getMask) == -1) {
-	 Salog(LV_ERROR, LOG_TYPE, "getaffinity failed %ld", ii);
+	 Salog(LV_ERROR, LOG_TYPE, "getaffinity failed");
     }
     int cpus = sysconf(_SC_NPROCESSORS_CONF);
     for (int i = 0; i < cpus; i++) {

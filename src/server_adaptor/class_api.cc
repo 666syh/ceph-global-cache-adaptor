@@ -6,7 +6,7 @@
 
 
 
-#include "mmon/config.h"
+#include "common/config.h"
 #include "common/debug.h"
 
 #include "objclass/objclass.h"

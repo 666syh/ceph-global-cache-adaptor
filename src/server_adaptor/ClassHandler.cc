@@ -159,7 +159,7 @@ int ClassHandler::_load_class(ClassData *cls)
 				r = -errno;
 				Salog(LV_DEBUG, LOG_TYPE, "could not stat class %s : %s", fname, cpp_strerror(r));
 			}else{
-			ldout(cct, 0) << "_load_class could not open class" << fname << " (dlopen failed): " << dlerror() << 
+			ldout(cct, 0) << "_load_class could not open class " << fname << " (dlopen failed): " << dlerror() << 
 				dendl;
 			Salog(LV_DEBUG, LOG_TYPE, "could not open class %s : %s", fname, dlerror());
 			r = -EIO;

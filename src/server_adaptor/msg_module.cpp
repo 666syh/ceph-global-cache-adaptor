@@ -36,7 +36,7 @@ static void decode_str_str_map_to_bl(bufferlist::const_iterator &p, bufferlist *
     start.copy(len, *out);
 }
 
-int MsgModule::ConvertClientopToOpreq(OSDOp &clientop, OpRequestOps &oneOp, OptionsType &optionsType)
+int MsgModule::ConvertClientopToOpreq(OSDOp &clientop, OpRequestOps &oneOp, OptionsType &optionType)
 {
     int ret = 0;
     oneOp.opSubType = clientop.op.op;

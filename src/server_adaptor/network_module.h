@@ -52,7 +52,7 @@ class NetworkModule {
     bool testMosdop { false };
 
     uint64_t queueNum { 0 };
-    uint32_t queuemaxCapacity { 0 };
+    uint32_t queueMaxCapacity { 0 };
     std::vector<std::thread> doOpThread {};
     std::vector<ClientOpQueue *> opDispatcher {};
     std::vector<bool> finishThread {};
