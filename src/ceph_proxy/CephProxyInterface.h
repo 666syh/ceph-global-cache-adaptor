@@ -17,23 +17,38 @@ extern "C" {
 #define OBJECT_ID_MAX_LEN 128
 #define CONFIG_PATH_LEN   128
 
+
 enum {
+
     CEPHPROXY_OP_FLAG_EXCL                = 0x1,
+
     CEPHPROXY_OP_FLAG_FAILOK              = 0x2,
+
     CEPHPROXY_OP_FLAG_FADVISE_RANDOM      = 0x4,
+
     CEPHPROXY_FLAG_FADVISE_SEQUENTIAL     = 0x8,
+
     CEPHPROXY_OP_FLAG_FADVISE_WILLNEED    = 0x10,
+
     CEPHPROXY_OP_FLAG_FADVISE_DONTNEED    = 0x20,
+
     CEPHPROXY_OP_FLAG_FADVISE_NOCACHE     = 0x40,
+
     CEPHPROXY_OP_FLAG_FADVISE_FUA         = 0x80,
 };
 
 enum {
+
     CEPHPROXY_CMPXATTR_OP_EQ              = 1,
+
     CEPHPROXY_CMPXATTR_OP_NE              = 2,
+
     CEPHPROXY_CMPXATTR_OP_GT              = 3,
+
     CEPHPROXY_CMPXATTR_OP_GTE             = 4,
+
     CEPHPROXY_CMPXATTR_OP_LT              = 5,
+
     CEPHPROXY_CMPXATTR_OP_LTE             = 6
 };
 
@@ -111,29 +126,55 @@ typedef enum {
     PROXY_CHECKSUM_TYPE_CRC32C   = 0x02,
 } proxy_checksum_type_t;
 
+typedef enum {
+    CEPH_BDEV_HDD = 0X00,
+    CEPH_BDEV_SSD = 0x01,
+} CEPH_BDEV_TYPE_E;
+
 typedef struct {
+
     uint64_t num_bytes;
+
     uint64_t num_kb;
+
     uint64_t num_objects;
+
     uint64_t num_object_clones;
+
     uint64_t num_object_copies;
+
     uint64_t num_objects_missing_on_primary;
+
     uint64_t num_objects_unfound;
+
+
     uint64_t num_objects_degraded;
+
     uint64_t num_rd;
+
     uint64_t num_rd_kb;
+
     uint64_t num_wr;
+
     uint64_t num_wr_kb;
+
     uint64_t num_user_bytes;
+
     uint64_t compressed_bytes_orig;
+
     uint64_t compressed_bytes;
+
     uint64_t compressed_bytes_alloc;
 } CephPoolStat;
 
 typedef struct {
+
     uint64_t kb;
+
     uint64_t kb_used;
+
     uint64_t kb_avail;
+
     uint64_t num_objects;
 } CephClusterStat;
 
@@ -147,109 +188,529 @@ typedef void *proxy_xattrs_iter_t;
 typedef void *proxy_omap_iter_t;
 typedef void *rados_client_t;
 
-int CephProxyInit(const char *conf, size_t wNum, const char *log, ceph_proxy_t *proxy);
+
+
+
+
+
+
+
+
+
+int CephProxyInit(const char *conf, size_t wNum, const char *log,
+	       		ceph_proxy_t *proxy);
+
+
+
+
+
+
 
 void CephProxyShutdown(ceph_proxy_t proxy);
 
+
+
+
+
+
+
 rados_ioctx_t CephProxyGetIoCtx(ceph_proxy_t proxy, const char *poolname);
  
+
+
+
+
+
+
 rados_ioctx_t CephProxyGetIoCtx2(ceph_proxy_t proxy, const int64_t poolId);
+
+
+
+
+
+
+
+int64_t CephProxyGetPoolIdByPoolName(ceph_proxy_t proxy, const char *poolName);
+
+
+
+
+
+
+
+
+
+int CephProxyGetPoolNameByPoolId(ceph_proxy_t proxy, int64_t poolId, char *buf, unsigned maxlen);
+
+
+
+
+
+
+
+
+
+int64_t CephProxyGetPoolIdByCtx(ceph_proxy_t proxy, rados_ioctx_t ioctx);
+
+
+
+
+
+
+
+int CephProxyGetMinAllocSize(ceph_proxy_t proxy, uint32_t *minAllocSize, CEPH_BDEV_TYPE_E type);
+
+
+
+
+
+
 
 int CephProxyGetClusterStat(ceph_proxy_t proxy, CephClusterStat *result);
 
+
+
+
+
+
+
+
 int CephProxyGetPoolStat(ceph_proxy_t proxy, rados_ioctx_t ioctx, CephPoolStat *stats);
+
+
+
+
+
+
+
 
 void CephProxyQueueOp(ceph_proxy_t proxy,rados_ioctx_t ioctx, ceph_proxy_op_t op, completion_t c);
 
-int CephProxyWriteOpInit(ceph_proxy_op_t *op, const char *pool, const char* oid);
+
+
+
+
+
+
 
 int CephProxyWriteOpInit2(ceph_proxy_op_t *op, const int64_t poolId, const char* oid);
 
+
+
+
+
+
 void CephProxyWriteOpRelease(ceph_proxy_op_t op);
+
+
+
+
+
+
 
 void CephProxyWriteOpSetFlags(ceph_proxy_op_t op, int flags);
 
+
+
+
+
+
 void CephProxyWriteOpAssertExists(ceph_proxy_op_t op);
+
+
+
+
+
 
 void CephProxyWriteOpAssertVersion(ceph_proxy_op_t op, uint64_t ver);
 
+
+
+
+
+
+
+
+
+
 void CephProxyWriteOpCmpext(ceph_proxy_op_t op, const char *cmpBuf, size_t cmpLen, uint64_t off, int *prval);
+
+
+
+
+
+
+
+
+
 
 void CephProxyWriteOpCmpXattr(ceph_proxy_op_t op,  const char *name, uint8_t compOperator, const char *value, size_t valLen);
 
+
+
+
+
+
+
+
+
+
+
 void CephProxyWriteOpOmapCmp(ceph_proxy_op_t op, const char *key, uint8_t compOperator, const char *value, size_t valLen, int *prval);
+
+
+
+
+
+
+
+
 
 void CephProxyWriteOpSetXattr(ceph_proxy_op_t op, const char *name, const char *value, size_t valLen);
 
+
+
+
+
+
+
 void CephProxyWriteOpRemoveXattr(ceph_proxy_op_t op, const char *name);
+
+
+
+
+
+
+
 
 void CephProxyWriteOpCreateObject(ceph_proxy_op_t op, int exclusive, const char *category);
 
+
+
+
+
+
+
+
+
 void CephProxyWriteOpWrite(ceph_proxy_op_t op, const char *buffer, size_t len, uint64_t off);
 
-void CephProxyWriteOpWriteSGL(ceph_proxy_op_t op, SGL_S *sgl, size_t len, uint64_t off);
+
+
+
+
+
+
+
+
+
+
+void CephProxyWriteOpWriteSGL(ceph_proxy_op_t op, SGL_S *sgl, size_t len1, uint64_t off, char *buffer, size_t len2, int isRelease);
+
+
+
+
+
+
+
 
 void CephProxyWriteOpWriteFull(ceph_proxy_op_t op, const char *buffer, size_t len);
 
-void CephProxyWriteOpWriteFullSGL(ceph_proxy_op_t op, const SGL_S *sgl, size_t len);
+
+
+
+
+
+
+
+
+void CephProxyWriteOpWriteFullSGL(ceph_proxy_op_t op, const SGL_S *sgl, size_t len, int isRelease);
+
+
+
+
+
+
+
+
+
 
 void CephProxyWriteOpWriteSame(ceph_proxy_op_t op, const char *buffer, size_t dataLen, size_t writeLen, uint64_t off);
 
-void CephProxyWriteOpWriteSameSGL(ceph_proxy_op_t op, const SGL_S *sgl, size_t dataLen, size_t writeLen, uint64_t off);
+
+
+
+
+
+
+
+void CephProxyWriteOpWriteSameSGL(ceph_proxy_op_t op, const SGL_S *sgl, size_t dataLen, size_t writeLen, uint64_t off, int isRelease);
+
+
+
+
+
+
+
 
 void CephProxyWriteOpAppend(ceph_proxy_op_t op, const char *buffer, size_t len);
 
-void CephProxyWriteOpAppendSGL(ceph_proxy_op_t op, const SGL_S *sgl, size_t len);
+
+
+
+
+
+
+
+void CephProxyWriteOpAppendSGL(ceph_proxy_op_t op, const SGL_S *sgl, size_t len, int isRelease);
+
+
+
+
+
 
 void CephProxyWriteOpRemove(ceph_proxy_op_t op);
 
+
+
+
+
+
+
 void CephProxyWriteOpTruncate(ceph_proxy_op_t op,  uint64_t off);
+
+
+
+
+
+
+
 
 void CephProxyWriteOpZero(ceph_proxy_op_t op,  uint64_t off, uint64_t len);
 
+
+
+
+
+
+
+
+
+
+
+
 void CephProxyWriteOpOmapSet(ceph_proxy_op_t op, char const* const* keys, char const* const* vals, const size_t *lens, size_t num);
+
+
+
+
+
+
+
 
 void CephProxyWriteOpOmapRmKeys(ceph_proxy_op_t op, char const* const* keys, size_t keysLen);
 
+
+
+
+
+
 void CephProxyWriteOpOmapClear(ceph_proxy_op_t op);
+
+
+
+
+
+
+
+
 
 void CephProxyWriteOpSetAllocHint(ceph_proxy_op_t op, uint64_t expectedObjSize, uint64_t expectedWriteSize, uint32_t flags);
 
-int CephProxyReadOpInit(ceph_proxy_op_t *op, const char *pool, const char* oid);
+
+
+
+
+
+
 
 int CephProxyReadOpInit2(ceph_proxy_op_t *op, const int64_t poolId, const char* oid);
 
+
+
+
+
+
 void CephProxyReadOpRelease(ceph_proxy_op_t op);
+
+
+
+
+
+
 
 void CephProxyReadOpSetFlags(ceph_proxy_op_t op, int flags);
 
+
+
+
+
+
 void CephProxyReadOpAssertExists(ceph_proxy_op_t op);
+
+
+
+
+
+
 
 void CephProxyReadOpAssertVersion(ceph_proxy_op_t op, uint64_t ver);
 
+
+
+
+
+
+
+
+
+
 void CephProxyReadOpCmpext(ceph_proxy_op_t op, const char *cmpBuf, size_t cmpLen, uint64_t off, int *prval);
+
+
+
+
+
+
+
+
+
 
 void CephProxyReadOpCmpXattr(ceph_proxy_op_t op,  const char *name, uint8_t compOperator, const char *value, size_t valueLen);
 
+
+
+
+
+
+
+
 void CephProxyReadOpGetXattrs(ceph_proxy_op_t op, proxy_xattrs_iter_t *iter, int *prval);
+
+
+
+
+
+
+
+
+
+
 
 void CephProxyReadOpOmapCmp(ceph_proxy_op_t op, const char *key, uint8_t compOperator, const char *val, size_t valLen, int *prval);
 
+
+
+
+
+
+
+
+
 void CephProxyReadOpStat(ceph_proxy_op_t op, uint64_t *psize, time_t *pmtime, int *prval);
+
+
+
+
+
+
+
+
+
+
 
 void CephProxyReadOpRead(ceph_proxy_op_t op, uint64_t offset, size_t len, char *buffer, size_t *bytesRead, int *prval);
 
-void CephProxyReadOpReadSGL(ceph_proxy_op_t op, uint64_t offset, size_t len, SGL_S *sgl, int *prval);
 
-void CephProxyReadOpCheckSum(ceph_proxy_op_t op, proxy_checksum_type_t type, const char *initValue, size_t initValueLen, uint64_t offset, size_t len, size_t chunkSize, char *pCheckSum, size_t checkSumLen, int *prval);
+
+
+
+
+
+
+
+
+void CephProxyReadOpReadSGL(ceph_proxy_op_t op, uint64_t offset, size_t len, SGL_S *sgl, int *prval, int isRelease);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+void CephProxyReadOpCheckSum(ceph_proxy_op_t op, proxy_checksum_type_t type, const char *initValue, size_t initValueLen,
+	       			uint64_t offset, size_t len, size_t chunkSize, char *pCheckSum, 
+				size_t checkSumLen, int *prval);
+
+
+
+
+
+
+
+
+
+
 
 completion_t CephProxyCreateCompletion(CallBack_t fn, void *arg);
 
+
+
+
+
+
 void CephProxyCompletionDestroy(completion_t c);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 #ifdef __cplusplus
 }
 #endif
 
 #endif
-

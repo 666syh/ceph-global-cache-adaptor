@@ -48,9 +48,9 @@ int CephProxy::Init(const std::string &cephConf,
     config.workerNum = wNum;
     state = PROXY_INITING;
 
-    ret = RadosClientInit(&radosClient, std::strinf(ProxyGetCephConf()));
+    ret = RadosClientInit(&radosClient, std::string(ProxyGetCephConf()));
     if ( ret < 0) {
-	ProxyDbgLogErr("RadosClient Init failed: %d", ret);
+	ProxyDbgLogErr("RadosClient Init failed: %d.", ret);
 	return ret;
     }
 
@@ -66,13 +66,13 @@ int CephProxy::Init(const std::string &cephConf,
     vecCoreId.resize(0);
     pid_t pid = CephProxyGetPid();
     uint32_t bindCore = ProxyGetBindCore();
-    if (pid != EN0SYS && bindCore == 1) {
+    if (pid != -ENOSYS && bindCore == 1) {
 	const char *delim = ",";
 	std::unique_ptr<char[]> tmp = std::make_unique<char[]>(coreNumber.size() + 1);
 	strcpy(tmp.get(), coreNumber.c_str());
 	char *p;
 	char *savep;
-	p = strtok_r(tmp.get(), delim, *savep);
+	p = strtok_r(tmp.get(), delim, &savep);
 	while (p) {
 	    vecCoreId.push_back(atoi(p));
 	    p = strtok_r(nullptr, delim, &savep);
@@ -85,7 +85,7 @@ int CephProxy::Init(const std::string &cephConf,
 	ProxyDbgLogErr("Allocate memory failed.");
 	return -1;
     }
-    worker->Start(VecCoreId);
+    worker->Start(vecCoreId);
 
     state = PROXY_ACTIVE;
     return ret;
@@ -141,39 +141,39 @@ rados_ioctx_t CephProxy::GetIoCtx2(const int64_t poolId)
     return ioctx;
 }
 
-int CephProxy::GetPooIdByPoolName(const char *poolName)
+int64_t CephProxy::GetPoolIdByPoolName(const char *poolName)
 {
     rados_ioctx_t ioctx;
-    int ret = RadosCreateIoctx(radosClient, poolName, &ioctx);
+    int ret = RadosCreateIoCtx(radosClient, poolName, &ioctx);
     if (ret != 0) {
-        ProxyDbgLogErr("Create IoCtx failed: %d", ret);
+        ProxyDbgLogErr("Create IoCtx Failed: %d", ret);
         return -1;
     }
     
     ret = RadosGetPoolId(ioctx);
     if (ret < 0) {
-        ProxyDbgLogErr("Get Pool ID failed: %d", ret);
+        ProxyDbgLogErr("Get Pool ID Failed: %d", ret);
     }
 
-    RadosReleaseIoctx(ioctx);
+    RadosReleaseIoCtx(ioctx);
     return ret;
 }
 
 int CephProxy::GetPoolNameByPoolId(int64_t poolId, char *buf, unsigned maxLen)
 {
     rados_ioctx_t ioctx;
-    int ret = RadosCreateIoctx2(radosClient, poolId, &ioctx);
+    int ret = RadosCreateIoCtx2(radosClient, poolId, &ioctx);
     if (ret != 0) {
-        ProxyDbgLogErr("Create IoCtx failed: %d", ret);
+        ProxyDbgLogErr("Create IoCtx Failed: %d", ret);
         return -1;
     }
     
     ret = RadosGetPoolName(ioctx, buf, maxLen);
     if (ret < 0) {
-        ProxyDbgLogErr("Get Pool Name failed: %d", ret);
+        ProxyDbgLogErr("Get Pool ID Failed: %d", ret);
     }
 
-    RadosReleaseIoctx(ioctx);
+    RadosReleaseIoCtx(ioctx);
     return ret;
 }
 
@@ -181,7 +181,7 @@ int64_t CephProxy::GetPoolIdByCtx(rados_ioctx_t ioctx)
 {
     int ret = RadosGetPoolId(ioctx);
     if (ret < 0) {
-        ProxyDbgLogErr("Get Pool ID failed: %d", ret);
+        ProxyDbgLogErr("Get Pool ID Failed: %d", ret);
     }
 
     return ret;
