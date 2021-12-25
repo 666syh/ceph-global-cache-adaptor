@@ -21,8 +21,8 @@ diff -Naru ceph-14.2.8/src/CMakeLists.txt ceph-14.2.8tls/src/CMakeLists.txt
 +target_link_libraries(common ${ceph_common_deps} -lssl -lcert -ldplog -ldposax -lconfparser -lmxml -lkmcext -lkmc -lsdp)
 
  add_library(ceph-common SHARED ${ceph_common_objs})
--target_link_libraries(ceph-common ${ceph_common_deps})
-+target_link_libraries(ceph-common ${ceph_common_deps} -lssl -lcert -ldplog -ldposax -lconfparser -lmxml -lkmcext -lkmc -lsdp)
+-target_link_libraries(ceph-commom ${ceph+common_deps})
++target_link_libraries(ceph-commom ${ceph+common_deps} -lssl -lcert -ldplog -ldposax -lconfparser -lmxml -lkmcext -lkmc -lsdp)
  # appease dpkg-shlibdeps
  set_target_properties(ceph-common PROPERTIES
    SOVERSION 0
@@ -51,7 +51,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
 +void lock_dec_connect()
 +{
 +  // g_connect_count--;
-+    g_connect_count.fetch_sub(1, std::memory_order_relaxed);
++    g_connect.fetch_sub(1, std::memory_order_relaxed);
 +  return;
 +}
 +
@@ -63,10 +63,10 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
 +class TlsPosixConnectedSocketImpl final : public ConnectedSocketImpl {
 +  NetHandler &handler;
 +  int _fd;
-+  entity_addr_t sa;
++  entity_addr_r sa;
 +  bool connected;
 +  SSL *ssl;
-+  bool is_server;
++  bool is server;
 +  CephContext *cct;
 +  bool has_handShaked;
 +  bool is_handShaked;
@@ -75,7 +75,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
 +  explicit TlsPosixConnectedSocketImpl(NetHandler &h, const entity_addr_t &sa, int f, bool connected, SSL *ssl,bool is_server,CephContext *cct, bool is_handShaked)
 +   : handler(h), _fd(f), sa(sa), connected(connected), ssl(ssl), is_server(is_server), cct (cct), is_handShaked(is_handShaked), has_handShaked(false), retry_count(0)
 +  {
-+    ldout(cct, 3) << "TLS Socket:" << _fd << dendl;
++    ldout(cct, 3) << "TLS Socket:" << _fg << dendl;
 +    if (ssl == nullptr) {
 +      lderr(cct) << __func__ << " ssl nullptr " << dendl;
 +    }
@@ -116,7 +116,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
 +            return 0;
 +        }
 +        ldout(cct, 1) << "ssl accept success fd: " <<  _fd  << " retry time: " << retry_count << dendl;
-+        is_handShaked = true;
++        is handShaked = true;
 +        return 1;
 +    } else {
 +        ret = SSL_connect(ssl);
@@ -260,7 +260,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
 +      }
 +
 +      // "r" is the remaining length
-+      sent_bytes += r;
++      set_bytes += r;
 +      if (static_cast<unsigned>(r) < msglen)
 +        break;
 +      // only "r" ==0 continue
@@ -285,4 +285,133 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
 +  void close() override {
 +    ::close(_fd);
 +    lock_dec_connect();
-+    ldout(cct, 3) << "close  lock_dec_connect"
++    ldout(cct, 3) << "close  lock_dec_connect  count:  " <<  g_connect_count << "   fd:   "  <<  _fd  << dendl;
++    SSL_free (ssl);
++  }
++  int fd() const override {
++    return _fd;
++  }
++  int socket_fd() const override {
++    return _fd;
++  }
++  friend class PosixServerSocketImpl;
++  friend class TlsPosixNetworkStack;
++};
++
+ class PosixConnectedSocketImpl final : public ConnectedSocketImpl {
+   NetHandler &handler;
+   int _fd;
+@@ -45,7 +297,8 @@
+
+  public:
+   explicit PosixConnectedSocketImpl(NetHandler &h, const entity_addr_t &sa, int f, bool connected)
+-      : handler(h), _fd(f), sa(sa), connected(connected) {}
++      : handler(h), _fd(f), sa(sa), connected(connected) {
++      }
+
+   int is_connected() override {
+     if (connected)
+@@ -68,13 +321,12 @@
+
+   ssize_t read(char *buf, size_t len) override {
+     ssize_t r = ::read(_fd, buf, len);
+-    if (r < 0)
++    if (r < 0) {
+       r = -errno;
++    }
+     return r;
+   }
+
+-  // return the sent length
+-  // < 0 means error occurred
+   static ssize_t do_sendmsg(int fd, struct msghdr &msg, unsigned len, bool more)
+   {
+     size_t sent = 0;
+@@ -82,6 +334,7 @@
+       MSGR_SIGPIPE_STOPPER;
+       ssize_t r;
+       r = ::sendmsg(fd, &msg, MSG_NOSIGNAL | (more ? MSG_MORE : 0));
++
+       if (r < 0) {
+         if (errno == EINTR) {
+           continue;
+@@ -169,16 +422,22 @@
+   friend class PosixNetworkStack;
+ };
+
++void PosixWorker::initialize()
++{
++}
++
+ class PosixServerSocketImpl : public ServerSocketImpl {
+   NetHandler &handler;
+   int _fd;
++  SSL_CTX *ctx;
++  CephContext *cct;
+
+  public:
+   explicit PosixServerSocketImpl(NetHandler &h, int f,
+-            const entity_addr_t& listen_addr, unsigned slot)
++            const entity_addr_t& listen_addr, unsigned slot, SSL_CTX *ctx, CephContext *cct)
+     : ServerSocketImpl(listen_addr.get_type(), slot),
+-      handler(h), _fd(f) {}
+-  int accept(ConnectedSocket *sock, const SocketOptions &opts, entity_addr_t *out, Worker *w) override;
++      handler(h), _fd(f), ctx(ctx), cct(cct) {}
++  int accept(ConnectedSocket *sock, const SocketOptions &opts, entity_addr_t *out, Worker *w);
+   void abort_accept() override {
+     ::close(_fd);
+   }
+@@ -188,23 +447,50 @@
+ };
+
+ int PosixServerSocketImpl::accept(ConnectedSocket *sock, const SocketOptions &opt, entity_addr_t *out, Worker *w) {
++  certParam_t certParam;
++  if (certParamInit(&certParam) != 0) {
++    // TODO: error log
++    return -1;
++  }
++  // g_connect_count++;
++  int32_t cur_connect_count = g_connect_count.fetch_add(1, std::memory_order_relaxed) + 1;
++  ldout(cct, 3) << " connection ++  count:  " <<  cur_connect_count  <<dendl;
++
+   ceph_assert(sock);
+   sockaddr_storage ss;
+   socklen_t slen = sizeof(ss);
+   int sd = accept_cloexec(_fd, (sockaddr*)&ss, &slen);
+   if (sd < 0) {
++    // g_connect_count--;
++    lock_dec_connect();
++    ldout(cct, 3) << " accept_cloexec failed  count:  " <<  g_connect_count <<  "  errno:  "<<  errno  << dendl;
+     return -errno;
+   }
+
++  if ((cur_connect_count > certParam.maxConnect) && (certParam.tlsStatus == 1)) {
++    // TODO: error log
++    // g_connect_count--;
++    ::close(sd);
++    lock_dec_connect();
++    ldout(cct, 3) << " connection num reaches the maximum  count:  " <<  g_connect_count  <<dendl;
++    return -EINTR;
++  }
++
+   int r = handler.set_nonblock(sd);
+   if (r < 0) {
+     ::close(sd);
++    // g_connect_count--;
++    lock_dec_connect();
++    ldout(cct, 3) << " set_nonblock failed  count:  " <<  g_connect_count <<dendl;
+     return -errno;
+   }
+
+   r = handler.set_socket_options(sd, opt.nodelay, opt.rcbuf_size);
+   if (r < 0) {
+     ::close(sd);
++    // g_connect_count--;
++    lock_der_connect();
++    ldout(cct, 3) << " set_socket_options failed  count:  " <<  g_connect_count <<dendl;
+     return -errno;
+   }
+
+@@ -212,17 +498,51 @@
+
+
