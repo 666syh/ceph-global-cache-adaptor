@@ -87,7 +87,7 @@ int CephProxy::Init(const std::string &cephConf,
     }
     worker->Start(vecCoreId);
 
-    poolStatManager = new(std::nothrow) PoolUsageStar(this);
+    poolStatManager = new(std::nothrow) PoolUsageStat(this);
     if (poolStatManager == nullptr) {
         ProxyDbgLogErr("Allocate memory failed.");
         return -1;
@@ -216,7 +216,7 @@ int CephProxy::GetPoolUsedSizeAndMaxAvail(uint64_t &usedSize, uint64_t &maxAvail
 	return -1;
     }
 
-    return poolStatManager->GetPoolUsedSizeAndMaxAvail(usedSize, maxAvail);
+    return poolStatManager->GetPoolAllUsedAndAvail(usedSize, maxAvail);
 }
 
 int CephProxy::GetMinAllocSize(uint32_t *minAllocSize, CEPH_BDEV_TYPE_E type)

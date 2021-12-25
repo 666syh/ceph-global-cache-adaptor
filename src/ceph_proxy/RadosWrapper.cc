@@ -609,9 +609,9 @@ void RadosWriteOpWriteSameSGL(rados_op_t op, const SGL_S *s, size_t dataLen,
 void RadosWriteOpAppend(rados_op_t op, const char *buffer, size_t len)
 {
 	RadosObjectWriteOp *writeOp = reinterpret_cast<RadosObjectWriteOp *>(op);
-	bufferlist bl;	
-	bl.append(buffer,len);
-	writeOp->op.append(bl);
+
+	writeOp->bl.append(buffer,len);
+	writeOp->op.append(writeOp->bl);
 }
 
 void RadosWriteOpAppendSGL(rados_op_t op, const SGL_S *s, size_t len, int isRelease)

@@ -53,7 +53,7 @@ int32_t RadosIOWorker::Queue(ceph_proxy_op_t op, completion_t c)
 
     RadosObjectOperation *operation = reinterpret_cast<RadosObjectOperation *>(op);
     if (Ops.size() > IO_WORKER_QUEUE_MAX_COUNT) {
-	ProxyDbgLogErr("Too many requests are stacked in the IOWorker Queue, ops.size = %lu, poolId: %ld.",
+	ProxyDbgLogErr("Too many requests are stacked in the IOWorker Queue, ops.size = %d, poolId: %d.",
 			Ops.size(), operation->poolId);
 	return -1;
     }

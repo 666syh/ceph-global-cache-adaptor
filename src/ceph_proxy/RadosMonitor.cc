@@ -15,7 +15,7 @@ using namespace librados;
 
 std::string poolNamePattern = "\\s*(\\w*)\\s*";
 std::string poolIdPattern   = "(\\d+)\\s+";
-std::string storePattern    = "([0-9]+\\.?[0-9]*)\\s(TiB|GiB|MiB|KiB|B)*\\s*";
+std::string storedPattern    = "([0-9]+\\.?[0-9]*)\\s(TiB|GiB|MiB|KiB|B)*\\s*";
 std::string objectsPattern  = "([0-9]+\\.?[0-9]*)(k|M)*\\s*";
 std::string usedPattern     = "([0-9]*\\.?[0-9]*)\\s(TiB|GiB|MiB|KiB|B)*\\s*";
 std::string usedRatioPattern = "([0-9]*\\.?[0-9]*)\\s*";
@@ -25,9 +25,9 @@ uint64_t TransStrUnitToNum(const char *strUnit)
 {
     if (strcmp("PiB", strUnit) == 0) {
         return PIB_NUM;
-    } else if (strcmp("TiB", strUint) == 0) {
+    } else if (strcmp("TiB", strUnit) == 0) {
         return TIB_NUM;
-    } else if (strcmp("GiB", strUint) == 0) {
+    } else if (strcmp("GiB", strUnit) == 0) {
         return GIB_NUM;
     } else if (strcmp("MiB", strUnit) == 0) {
         return MIB_NUM;
@@ -40,7 +40,7 @@ uint64_t TransStrUnitToNum(const char *strUnit)
     return 1;
 }
 
-int32_t PoolUsageStat::GetPoolUsageInfo(uint32_t poolId, poolUsageInfo *poolInfo)
+int32_t PoolUsageStat::GetPoolUsageInfo(uint32_t poolId, PoolUsageInfo *poolInfo)
 {
     if (poolInfo == NULL) {
         ProxyDbgLogErr("poolInfo is NULL");
@@ -123,7 +123,7 @@ int32_t PoolUsageStat::Record(std::smatch &result)
 	} else if (i == 3) {
 	    storedSize = atof(result[i].str().c_str());
 	} else if (i == 4) {
-	    stroedSizeUnit = TransStrUnitToNum(result[i].str().c_str());
+	    storedSizeUnit = TransStrUnitToNum(result[i].str().c_str());
 	} else if (i == 5) {
 	    objectsNum = atof(result[i].str().c_str());
 	} else if (i == 6) {
@@ -150,7 +150,7 @@ int32_t PoolUsageStat::Record(std::smatch &result)
     double rep = 0.0;
     int32_t ret = GetPoolReplicationSize(poolId, rep);
     if (ret != 0) {
-        ProxyDbgLogErr("get replication size failed.");
+        ProxyDbgLogErr("get replicaiton size failed.");
 	return -1;
     }
 
@@ -186,9 +186,9 @@ static int GetPoolStorageUsage(PoolUsageStat *mgr, const char *input)
 	std::smatch result;
 	bool flag = std::regex_match(infoVector[i], result, expression);
 	if (flag) {
-	    uint32_t ret = mgr->Record(result);
+	    int32_t ret = mgr->Record(result);
 	    if (ret != 0) {
-	        ProxyDbgLogErr("record pool usage info failed.");
+	        ProxyDbgLogErr("record pool useage info failed.");
 		break;
 	    }
 	}
@@ -219,7 +219,7 @@ int PoolUsageStat::UpdatePoolUsage()
     ret = GetPoolStorageUsage(this, outbl.c_str());
     if (ret != 0) {
         ProxyDbgLogErr("get pool storage usage failed: %d", ret);
-        return ret;
+        return -1;
     }
 
     return 0;
@@ -245,7 +245,7 @@ static void PoolUsageTimer(PoolUsageStat *poolUsageManager)
 
 	int32_t ret = poolUsageManager->UpdatePoolUsage();
         if (ret != 0) {
-            ProxyDbgLogErr("update  pool usage failed.");
+            ProxyDbgLogErr("update pool usage failed.");
 	}
 
 	sleep(poolUsageManager->GetTimeInterval());

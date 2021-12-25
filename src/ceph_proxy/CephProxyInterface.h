@@ -1,3 +1,19 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #ifndef _CEPH_PROXY_INTERFACE_H_
 #define _CEPH_PROXY_INTERFACE_H_
 
@@ -249,8 +265,8 @@ int CephProxyGetPoolNameByPoolId(ceph_proxy_t proxy, int64_t poolId, char *buf, 
 
 
 
-
 int64_t CephProxyGetPoolIdByCtx(ceph_proxy_t proxy, rados_ioctx_t ioctx);
+
 
 
 
@@ -284,6 +300,15 @@ int CephProxyGetPoolStat(ceph_proxy_t proxy, rados_ioctx_t ioctx, CephPoolStat *
 
 
 
+int CephProxyGetUsedSizeAndMaxAvail(ceph_proxy_t proxy, uint64_t &usedSize, uint64_t &maxAvail);
+
+
+
+
+
+
+
+
 int32_t CephProxyQueueOp(ceph_proxy_t proxy, ceph_proxy_op_t op, completion_t c);
 
 
@@ -294,17 +319,6 @@ int32_t CephProxyQueueOp(ceph_proxy_t proxy, ceph_proxy_op_t op, completion_t c)
 
 
 int CephProxyWriteOpInit2(ceph_proxy_op_t *op, const int64_t poolId, const char* oid);
-
-
-
-
-
-
-int CephProxyGetUsedSizeAndMaxAvail(ceph_proxy_t proxy, uint64_t &usedSize, uint64_t &maxAvail);
-
-
-
-
 
 
 
