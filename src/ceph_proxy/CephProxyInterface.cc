@@ -94,6 +94,12 @@ int CephProxyGetState(ceph_proxy_t proxy)
 	return (int)(cephProxy->GetState());
 }
 
+int CephProxyGetUsedSizeAndMaxAvail(ceph_proxy_t proxy, uint64_t &usedSize, uint64_t &maxAvail)
+{
+	CephProxy *cephProxy = reinterpret_cast<CephProxy *>(proxy);
+	return cephProxy->GetPoolUsedSizeAndMaxAvail(usedSize, maxAvail);
+}
+
 int CephProxyWriteOpInit2(ceph_proxy_op_t *op, const int64_t poolId, const char* oid)
 {
 	*op = RadosWriteOpInit2(poolId, oid);

@@ -11,10 +11,12 @@
 #include "CephProxyInterface.h"
 #include "RadosWorker.h"
 #include "PoolContext.h"
+#include "RadosMonitor.h"
 
 typedef void *rados_client_t;
 
 class RadosWorker;
+class PoolUsageStat;
 
 typedef enum {
 	PROXY_INITING = 1,
@@ -35,6 +37,8 @@ public:
 	IOCtxTable ptable;
 	ProxyConfig config;
 	RadosWorker *worker;
+	PoolUsageStat *poolStatManager;
+
 	CephProxyState state;
 
 	static CephProxy *instance;
@@ -67,6 +71,7 @@ public:
 	int GetClusterStat(CephClusterStat *stat);
 	int GetPoolStat(rados_ioctx_t ctx, CephPoolStat *stat);
 	int GetMinAllocSize(uint32_t *minAllocSize, CEPH_BDEV_TYPE_E type);
+	int GetPoolUsedSizeAndMaxAvail(uint64_t &usedSize, uint64_t &maxAvail);
 };
 
 #endif

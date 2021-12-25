@@ -11,6 +11,7 @@ set(ceph_proxy_srcs CephProxyInterface.cc
                     CephProxyOp.cc
                     RadosWorker.cc
                     RadosWrapper.cc
+		    RadosMonitor.cc
 		    ConfigRead.cc
 		    CephProxyLog.h)
 

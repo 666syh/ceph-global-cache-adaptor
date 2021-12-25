@@ -21,8 +21,8 @@ diff -Naru ceph-14.2.8/src/CMakeLists.txt ceph-14.2.8tls/src/CMakeLists.txt
 +target_link_libraries(common ${ceph_common_deps} -lssl -lcert -ldplog -ldposax -lconfparser -lmxml -lkmcext -lkmc -lsdp)
 
  add_library(ceph-common SHARED ${ceph_common_objs})
--target_link_libraries(ceph-commom ${ceph+common_deps})
-+target_link_libraries(ceph-commom ${ceph+common_deps} -lssl -lcert -ldplog -ldposax -lconfparser -lmxml -lkmcext -lkmc -lsdp)
+-target_link_libraries(ceph-common ${ceph_common_deps})
++target_link_libraries(ceph-common ${ceph_common_deps} -lssl -lcert -ldplog -ldposax -lconfparser -lmxml -lkmcext -lkmc -lsdp)
  # appease dpkg-shlibdeps
  set_target_properties(ceph-common PROPERTIES
    SOVERSION 0
@@ -51,7 +51,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
 +void lock_dec_connect()
 +{
 +  // g_connect_count--;
-+    g_connect.fetch_sub(1, std::memory_order_relaxed);
++    g_connect_count.fetch_sub(1, std::memory_order_relaxed);
 +  return;
 +}
 +
@@ -63,10 +63,10 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
 +class TlsPosixConnectedSocketImpl final : public ConnectedSocketImpl {
 +  NetHandler &handler;
 +  int _fd;
-+  entity_addr_r sa;
++  entity_addr_t sa;
 +  bool connected;
 +  SSL *ssl;
-+  bool is server;
++  bool is_server;
 +  CephContext *cct;
 +  bool has_handShaked;
 +  bool is_handShaked;
@@ -75,7 +75,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
 +  explicit TlsPosixConnectedSocketImpl(NetHandler &h, const entity_addr_t &sa, int f, bool connected, SSL *ssl,bool is_server,CephContext *cct, bool is_handShaked)
 +   : handler(h), _fd(f), sa(sa), connected(connected), ssl(ssl), is_server(is_server), cct (cct), is_handShaked(is_handShaked), has_handShaked(false), retry_count(0)
 +  {
-+    ldout(cct, 3) << "TLS Socket:" << _fg << dendl;
++    ldout(cct, 3) << "TLS Socket:" << _fd << dendl;
 +    if (ssl == nullptr) {
 +      lderr(cct) << __func__ << " ssl nullptr " << dendl;
 +    }
@@ -116,7 +116,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
 +            return 0;
 +        }
 +        ldout(cct, 1) << "ssl accept success fd: " <<  _fd  << " retry time: " << retry_count << dendl;
-+        is handShaked = true;
++        is_handShaked = true;
 +        return 1;
 +    } else {
 +        ret = SSL_connect(ssl);
@@ -260,7 +260,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
 +      }
 +
 +      // "r" is the remaining length
-+      set_bytes += r;
++      sent_bytes += r;
 +      if (static_cast<unsigned>(r) < msglen)
 +        break;
 +      // only "r" ==0 continue

@@ -300,6 +300,17 @@ int CephProxyWriteOpInit2(ceph_proxy_op_t *op, const int64_t poolId, const char*
 
 
 
+int CephProxyGetUsedSizeAndMaxAvail(ceph_proxy_t proxy, uint64_t &usedSize, uint64_t &maxAvail);
+
+
+
+
+
+
+
+
+
+
 void CephProxyWriteOpRelease(ceph_proxy_op_t op);
 
 

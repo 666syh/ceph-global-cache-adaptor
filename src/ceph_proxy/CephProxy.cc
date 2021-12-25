@@ -87,11 +87,23 @@ int CephProxy::Init(const std::string &cephConf,
     }
     worker->Start(vecCoreId);
 
+    poolStatManager = new(std::nothrow) PoolUsageStar(this);
+    if (poolStatManager == nullptr) {
+        ProxyDbgLogErr("Allocate memory failed.");
+        return -1;
+    }
+    poolStatManager->Start();
+
     state = PROXY_ACTIVE;
     return ret;
 }
 
 void CephProxy::Shutdown() {
+    if (poolStatManager) {
+	poolStatManager->Stop();
+	delete poolStatManager;
+	poolStatManager = nullptr;
+    }
 
     if (worker) {
 	worker->Stop();
@@ -195,6 +207,16 @@ int CephProxy::GetClusterStat(CephClusterStat *stat)
 int CephProxy::GetPoolStat(rados_ioctx_t ctx, CephPoolStat *stat)
 {
 	return RadosGetPoolStat(radosClient, ctx, stat);
+}
+
+int CephProxy::GetPoolUsedSizeAndMaxAvail(uint64_t &usedSize, uint64_t &maxAvail)
+{
+    if (poolStatManager == nullptr) {
+	ProxyDbgLogErr("proxy is not working.");
+	return -1;
+    }
+
+    return poolStatManager->GetPoolUsedSizeAndMaxAvail(usedSize, maxAvail);
 }
 
 int CephProxy::GetMinAllocSize(uint32_t *minAllocSize, CEPH_BDEV_TYPE_E type)
