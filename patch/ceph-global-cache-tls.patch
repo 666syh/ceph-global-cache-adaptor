@@ -40,7 +40,7 @@ diff -Naru ceph-14.2.8/src/msg/async/cert_ceph.h ceph-14.2.8tls/src/msg/async/ce
 +  http://www.apache.org/licenses/LICENSE-2.0
 +
 +unless required by applicable law or agreed to in writing, software
-+distributed under the Lincense is distributed on an "AS IS" BASIS,
++distributed under the License is distributed on an "AS IS" BASIS,
 +WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 +See the License for the specific language governing permissions and
 +limitations under the License.
@@ -567,7 +567,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
    if (opts.nonblock) {
      sd = net.nonblock_connect(addr, opts.connect_bind_addr);
    } else {
-@@ -282,9 +600,32 @@
+@@ -282,8 +600,32 @@
    }
 
    net.set_priority(sd ,opts.priority, addr.get_family());
