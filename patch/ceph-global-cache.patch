@@ -545,7 +545,7 @@ index 00000000000..0d87835131a
 +    regOps->SubmitDasPrefetch = das_req_prefetch;
 +    dasInstanceParam->ops = regOps;
 +
-+    rc = OpenRcacheCreateDasModule(this, dasInstanceParam);
++    rc = OpenRcacheCeateDasModule(this, dasInstanceParam);
 +    if (rc) {
 +      return -1;
 +    }
@@ -922,8 +922,8 @@ index 00000000000..d735594947f
 +extern "C" {
 +#endif
 +
-+#define PT_VIEW_MAX_COPY_NUM        (6)
-+#define MAX_DISK_NUM_PER_NODE       (16)
++#define PT_VIEW_MAX_COPY_NUM        6
++#define MAX_DISK_NUM_PER_NODE       16
 +#define IP_ADDR_LEN                 (16)
 +#define DISK_NAME_LEN               (64)
 +#define DISK_SN_LEN                 (64)
@@ -932,7 +932,7 @@ index 00000000000..d735594947f
 +typedef enum {
 +    VDISK_STATE_DOWN = 0,
 +    VDISK_STATE_UP   = 1,
-+    VDISK_STATE_BUTT
++    VIDSK_STATE_BUTT
 +} VdiskState;
 +
 +typedef struct {
@@ -948,7 +948,7 @@ index 00000000000..d735594947f
 +typedef struct {
 +    uint32_t nodeId;
 +    uint32_t state;
-+    uint32_t ipv4Addr;
++    uint32_t ipv4addr;
 +    char ipv4AddrStr[IP_ADDR_LEN];
 +    char publicAddrStr[IP_ADDR_LEN];
 +    char clusterAddrStr[IP_ADDR_LEN];
@@ -1036,7 +1036,7 @@ index 00000000000..d735594947f
 +    CCM_MODULE_PLOG = 6,
 +    CCM_MODULE_STREAM = 7,
 +    CCM_MODULE_POOL = 8,
-+    CCM_MODULE_BUTT
++    CCM_MODULE_BUTT,
 +} ModuleType;
 +
 +int32_t OpenAgentInit(void);
@@ -1081,7 +1081,7 @@ index 00000000000..8d2d233c964
 +    DAS_ALG_SEQ = 0,
 +    DAS_ALG_REVERSE_SEQ,
 +    DAS_ALG_STRIDE,
-+    DAS_ALG_BUTT
++    DAS_ALG_BUTT,
 +} DasAlgType;
 +
 +typedef struct TagDasKvParam {
@@ -1106,14 +1106,13 @@ index 00000000000..8d2d233c964
 +    DasOPS *ops;
 +} DasModuleParam;
 +
-+int32_t OpenRcacheCreateDasModule(void *handle, DasModuleParam *createInstanceParam);
++int32_t OpenRcacheCeateDasModule(void* handle, DasModuleParam *createInstanceParam);
 +
 +int32_t OpenRcachePutDasInfo(DasKvParam *params[], uint32_t keyNum);
 +
 +void OpenRcacheExitDasModule(void *handle);
 +
 +#endif // OPEN_DAS_H
-\ No newline at end of file
 diff --git a/src/common/options.cc b/src/common/options.cc
 index 8135ea8f1eb..fb9215e3a9b 100644
 --- a/src/common/options.cc
