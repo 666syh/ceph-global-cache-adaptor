@@ -20,7 +20,7 @@ function initialize()
 
 function pack_lib()
 {
-        if [[ $tar_mode == "DEBUG"]]
+        if [[ $tar_mode == "DEBUG" ]]
         then
                 tar -zcvf globalcache-adaptorlib-debug-oe1.tar.gz globalcache-adaptorlib
         else

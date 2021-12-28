@@ -151,7 +151,7 @@ static void ConfigTrim(uint8_t *str)
 
 static int32_t CheckIsOctal(uint8_t *ptemp)
 {
-	if ((*ptemp == '0') && (*(ptemp + 1) ! = 'x') && (*(ptemp + 1) ! = 'X') && (*(ptemp + 1) ! = '\0')) {
+	if ((*ptemp == '0') && (*(ptemp + 1) != 'x') && (*(ptemp + 1) != 'X') && (*(ptemp + 1) ! = '\0')) {
 		return RETURN_OK;
 	}
 
