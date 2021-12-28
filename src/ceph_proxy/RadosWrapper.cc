@@ -1,3 +1,9 @@
+/* License:LGPL-2.1
+ *
+ * Copyright (c) 2021 Huawei Technologies Co., Ltf All rights reserved.
+ *
+ */
+
 #include "CephProxyInterface.h"
 #include "RadosWrapper.h"
 #include "CephProxyOp.h"

@@ -1,3 +1,9 @@
+/* License:LGPL-2.1
+ *
+ * Copyright (c) 2021 Huawei Technologies Co., Ltf All rights reserved.
+ *
+ */
+
 #ifndef _CEPH_PROXY_RADOS_WORKER_H_
 #define _CEPH_PROXY_RADOS_WORKER_H_
 

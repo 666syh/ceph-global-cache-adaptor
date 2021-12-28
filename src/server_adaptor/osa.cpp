@@ -1,8 +1,8 @@
-
-
-
-
-
+/* License:LGPL-2.1
+ *
+ * Copyright (c) 2021 Huawei Technologies Co., Ltd. All rights reserved.
+ *
+ */
 
 #include <string> 
 #include <iostream>

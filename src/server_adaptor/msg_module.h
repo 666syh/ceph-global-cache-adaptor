@@ -1,4 +1,4 @@
-/*
+/* License:LGPL-2.1
  *
  * Copyright (c) Huawei Technologies Co., Ltd. 2021-2021. All rights reserved.
  * Description:Process many message.

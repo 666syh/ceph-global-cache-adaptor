@@ -1,8 +1,8 @@
-/*
+/* License:LGPL-2.1
+ *
  * Copyright (c) Huawei Technologies Co., Ltd. 2021-2021. All rights reserved.
  * Description: Interact with Messanger(ClientAdaptor) and CCM agent.
  */
-
 
 #include "network_module.h"
 

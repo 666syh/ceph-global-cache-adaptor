@@ -1,8 +1,8 @@
-
-
-
-
-
+/* License:LGPL-2.1
+ *
+ * Copyright (c) 2021 Huawei Technologies Co., Ltf All rights reserved.
+ *
+ */
 
 #ifndef CLIENT_OP_QUEUE_H
 #define CLIENT_OP_QUEUE_H
