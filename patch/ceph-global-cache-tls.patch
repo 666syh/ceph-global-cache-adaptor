@@ -1,25 +1,25 @@
 diff -Naru ceph-14.2.8/CMakeLists.txt ceph-14.2.8tls/CMakeLists.txt
---- ceph-14.2.8/CMakeLists.txt   2020-03-03 01:49:20.000000000 +0800
-+++ ceph-14.2.8tls/CMakeLists.txt   2021-12-18 17:48:43.608746610 +0800
+--- ceph-14.2.8/CMakeLists.txt	2020-03-03 01:49:20.000000000 +0800
++++ ceph-14.2.8tls/CMakeLists.txt	2021-12-18 17:48:43.608746610 +0800
 @@ -3,6 +3,8 @@
  project(ceph CXX C ASM)
  set(VERSION 14.2.8)
-
+ 
 +link_directories(/opt/gcache_adaptor_compile/third_part/lib/)
 +include_directories(/opt/gcache_adaptor_compile/third_part/inc/)
  if(POLICY CMP0028)
    cmake_policy(SET CMP0028 NEW)
  endif()
 diff -Naru ceph-14.2.8/src/CMakeLists.txt ceph-14.2.8tls/src/CMakeLists.txt
---- ceph-14.2.8/src/CMakeLists.txt  2020-03-03 01:49:20.000000000 +0800
-+++ ceph-14.2.8tls/src/CMakeLists.txt  2021-12-18 17:48:43.608746610 +0800
+--- ceph-14.2.8/src/CMakeLists.txt	2020-03-03 01:49:20.000000000 +0800
++++ ceph-14.2.8tls/src/CMakeLists.txt	2021-12-18 17:48:43.608746610 +0800
 @@ -394,10 +394,10 @@
  endif()
-
+ 
  add_library(common STATIC ${ceph_common_objs})
 -target_link_libraries(common ${ceph_common_deps})
 +target_link_libraries(common ${ceph_common_deps} -lssl -lcert -ldplog -ldposax -lconfparser -lmxml -lkmcext -lkmc -lsdp)
-
+ 
  add_library(ceph-common SHARED ${ceph_common_objs})
 -target_link_libraries(ceph-common ${ceph_common_deps})
 +target_link_libraries(ceph-common ${ceph_common_deps} -lssl -lcert -ldplog -ldposax -lconfparser -lmxml -lkmcext -lkmc -lsdp)
@@ -27,25 +27,25 @@ diff -Naru ceph-14.2.8/src/CMakeLists.txt ceph-14.2.8tls/src/CMakeLists.txt
  set_target_properties(ceph-common PROPERTIES
    SOVERSION 0
 diff -Naru ceph-14.2.8/src/msg/async/cert_ceph.h ceph-14.2.8tls/src/msg/async/cert_ceph.h
---- ceph-14.2.8/src/msg/async/cert_ceph.h 1970-01-01 08:00:00.000000000 +0800
-+++ ceph-14.2.8tls/src/msg/async/cert_ceph.h 2021-12-24 16:36:09.504746610 +0800
+--- ceph-14.2.8/src/msg/async/cert_ceph.h	1970-01-01 08:00:00.000000000 +0800
++++ ceph-14.2.8tls/src/msg/async/cert_ceph.h	2021-12-24 16:36:09.504746610 +0800
 @@ -0,0 +1,61 @@
 +/*
-+Copyright (c) 2021 Huawei Technologies Co., Ltd ALL rights reserved.
++Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
 +
 +Licensed under the Apache License, Version 2.0 (the "License");
 +you may not use this file except in compliance with the License.
 +You may obtain a copy of the License at
 +
-+  http://www.apache.org/licenses/LICENSE-2.0
++	http://www.apache.org/licenses/LICENSE-2.0
 +
-+unless required by applicable law or agreed to in writing, software
++Unless required by applicable law or agreed to in writing, software
 +distributed under the License is distributed on an "AS IS" BASIS,
 +WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 +See the License for the specific language governing permissions and
 +limitations under the License.
 +*/
-+
++ 
 +#ifndef _CERT_CEPH_H_
 +#define _CERT_CEPH_H_
 +
@@ -92,8 +92,8 @@ diff -Naru ceph-14.2.8/src/msg/async/cert_ceph.h ceph-14.2.8tls/src/msg/async/ce
 +
 +#endif
 diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/PosixStack.cc
---- ceph-14.2.8/src/msg/async/PosixStack.cc  2020-03-03 01:49:20.000000000 +0800
-+++ ceph-14.2.8tls/src/msg/async/PosixStack.cc  2021-12-18 23:23:31.740746610 +0800
+--- ceph-14.2.8/src/msg/async/PosixStack.cc	020-03-03 01:49:20.000000000 +0800
++++ ceph-14.2.8tls/src/msg/async/PosixStack.cc	021-12-18 23:23:31.740746610 +0800
 @@ -13,7 +13,6 @@
   * Foundation.  See file COPYING.
   *
@@ -105,7 +105,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
 @@ -33,10 +32,263 @@
  #include "include/compat.h"
  #include "include/sock_compat.h"
-
+ 
 +
 +#define RETRY_TIME 10000
 +#define MAX_VERIFY_DEPTH 10
@@ -115,15 +115,15 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
 +
 +void lock_dec_connect()
 +{
-+  // g_connect_count--;
++	// g_connect_count--;
 +    g_connect_count.fetch_sub(1, std::memory_order_relaxed);
-+  return;
++	return;
 +}
 +
  #define dout_subsys ceph_subsys_ms
  #undef dout_prefix
  #define dout_prefix *_dout << "PosixStack "
-
+ 
 +
 +class TlsPosixConnectedSocketImpl final : public ConnectedSocketImpl {
 +  NetHandler &handler;
@@ -137,7 +137,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
 +  bool is_handShaked;
 +  int retry_count;
 + public:
-+  explicit TlsPosixConnectedSocketImpl(NetHandler &h, const entity_addr_t &sa, int f, bool connected, SSL *ssl,bool is_server,CephContext *cct, bool is_handShaked)
++  explicit TlsPosixConnectedSocketImpl(NetHandler &h, const entity_addr_t &sa, int f, bool connected, SSL *ssl,bool is_server, CephContext *cct, bool is_handShaked)
 +   : handler(h), _fd(f), sa(sa), connected(connected), ssl(ssl), is_server(is_server), cct (cct), is_handShaked(is_handShaked), has_handShaked(false), retry_count(0)
 +  {
 +    ldout(cct, 3) << "TLS Socket:" << _fd << dendl;
@@ -166,7 +166,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
 +
 +  int try_handShaked() {
 +    if (is_handShaked) {
-+     return 1;
++    	return 1;
 +    }
 +    if (retry_count++ > RETRY_TIME) {
 +        lderr(cct) << __func__ << " ssl accept failed error " << "retry time" << retry_count << dendl;
@@ -175,7 +175,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
 +
 +    int ret = 0;
 +    if (is_server) {
-+     ret = SSL_accept(ssl);
++    	ret = SSL_accept(ssl);
 +        if (ret <= 0) {
 +            ldout(cct, 3) << "ssl accept failed fd: " <<  _fd  << " retry time: " << retry_count << dendl;
 +            return 0;
@@ -217,10 +217,10 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
 +      if (read_errno == 11) {
 +        ldout(cct, 4) << "TLS read fail, r = " <<  r << "  errno = " << read_errno << "len = "  << len << "fd: " << _fd << "ssl_errno: "<< ssl_errno << " ssl_errno_str: " << error_string <<dendl;
 +      } else {
-+        lderr(cct) << "TLS read fail, r = " <<  r << "  errno = " << read_errno << "len = "  << len << "fd: " << _fd << "ssl_errno: "<< ssl_errno << " ssl_errno_str: " << error_string <<dendl;
++     	 lderr(cct) << "TLS read fail, r = " <<  r << "  errno = " << read_errno << "len = "  << len << "fd: " << _fd << "ssl_errno: "<< ssl_errno << " ssl_errno_str: " << error_string <<dendl;
 +      }
 +      if (ssl_errno == SSL_ERROR_ZERO_RETURN) {
-+        r = 0;
++      	r = 0;
 +      } else {
 +        r = -read_errno;
 +      }
@@ -228,7 +228,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
 +    return r;
 +  }
 +
-+  ssize_t do_sendmsg(int fd, struct msghdr &msg, unsigned len, bool more,SSL* ssl)
++  ssize_t do_sendmsg(int fd, struct msghdr &msg, unsigned len, bool more, SSL* ssl)
 +  {
 +    char* tempBuffer = (char*)malloc(len);
 +    if (tempBuffer == nullptr) {
@@ -328,7 +328,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
 +      sent_bytes += r;
 +      if (static_cast<unsigned>(r) < msglen)
 +        break;
-+      // only "r" ==0 continue
++      // only "r" == 0 continue
 +    }
 +
 +    if (sent_bytes) {
@@ -367,17 +367,17 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
    NetHandler &handler;
    int _fd;
 @@ -45,7 +297,8 @@
-
+ 
   public:
    explicit PosixConnectedSocketImpl(NetHandler &h, const entity_addr_t &sa, int f, bool connected)
 -      : handler(h), _fd(f), sa(sa), connected(connected) {}
 +      : handler(h), _fd(f), sa(sa), connected(connected) {
 +      }
-
+ 
    int is_connected() override {
      if (connected)
 @@ -68,13 +321,12 @@
-
+ 
    ssize_t read(char *buf, size_t len) override {
      ssize_t r = ::read(_fd, buf, len);
 -    if (r < 0)
@@ -386,7 +386,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
 +    }
      return r;
    }
-
+ 
 -  // return the sent length
 -  // < 0 means error occurred
    static ssize_t do_sendmsg(int fd, struct msghdr &msg, unsigned len, bool more)
@@ -403,7 +403,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
 @@ -169,16 +422,22 @@
    friend class PosixNetworkStack;
  };
-
+ 
 +void PosixWorker::initialize()
 +{
 +}
@@ -413,11 +413,11 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
    int _fd;
 +  SSL_CTX *ctx;
 +  CephContext *cct;
-
+ 
   public:
    explicit PosixServerSocketImpl(NetHandler &h, int f,
--            const entity_addr_t& listen_addr, unsigned slot)
-+            const entity_addr_t& listen_addr, unsigned slot, SSL_CTX *ctx, CephContext *cct)
+-				const entity_addr_t& listen_addr, unsigned slot)
++				const entity_addr_t& listen_addr, unsigned slot, SSL_CTX *ctx, CephContext *cct)
      : ServerSocketImpl(listen_addr.get_type(), slot),
 -      handler(h), _fd(f) {}
 -  int accept(ConnectedSocket *sock, const SocketOptions &opts, entity_addr_t *out, Worker *w) override;
@@ -428,7 +428,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
    }
 @@ -188,23 +447,50 @@
  };
-
+ 
  int PosixServerSocketImpl::accept(ConnectedSocket *sock, const SocketOptions &opt, entity_addr_t *out, Worker *w) {
 +  certParam_t certParam;
 +  if (certParamInit(&certParam) != 0) {
@@ -449,7 +449,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
 +    ldout(cct, 3) << " accept_cloexec failed  count:  " <<  g_connect_count <<  "  errno:  "<<  errno  << dendl;
      return -errno;
    }
-
+ 
 +  if ((cur_connect_count > certParam.maxConnect) && (certParam.tlsStatus == 1)) {
 +    // TODO: error log
 +    // g_connect_count--;
@@ -467,7 +467,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
 +    ldout(cct, 3) << " set_nonblock failed  count:  " <<  g_connect_count <<dendl;
      return -errno;
    }
-
+ 
    r = handler.set_socket_options(sd, opt.nodelay, opt.rcbuf_size);
    if (r < 0) {
      ::close(sd);
@@ -476,9 +476,9 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
 +    ldout(cct, 3) << " set_socket_options failed  count:  " <<  g_connect_count <<dendl;
      return -errno;
    }
-
+ 
 @@ -212,17 +498,51 @@
-
+ 
    out->set_type(addr_type);
    out->set_sockaddr((sockaddr*)&ss);
 +  entity_addr_t local_addr;
@@ -490,7 +490,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
 +  }
 +  local_addr.set_sockaddr((sockaddr*)&localS);
    handler.set_priority(sd, opt.priority, out->get_family());
-
+ 
 -  std::unique_ptr<PosixConnectedSocketImpl> csi(new PosixConnectedSocketImpl(handler, *out, sd, true));
 -  *sock = ConnectedSocket(std::move(csi));
 +  if ((certParam.tlsStatus == 1) && (local_addr.get_port() >= 7880 && local_addr.get_port() <= 7889)) {
@@ -505,7 +505,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
 +    ldout(cct, 3) << __func__ << " TLS accept fd:  " << sd << " port: " <<  local_addr.get_port() << "  SSL Version: "  <<  SSL_get_version(sslNew)  <<dendl;
 +    if (SSL_set_fd(sslNew, sd) <= 0) {
 +      lderr(cct) << __func__ << " ctx set fd failed "  << dendl;
-+      ldout(cct, 3) << " ctx set fd failed  count:  " << g_connect_count <<dendl;
++      ldout(cct, 3) << " ctx set fd failed  count:  " <<  g_connect_count <<dendl;
 +      // g_connect_count--;
 +      ::close(sd);
 +      lock_dec_connect();
@@ -527,14 +527,14 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
 +  }
    return 0;
  }
-
+ 
 -void PosixWorker::initialize()
 -{
 -}
 -
  int PosixWorker::listen(entity_addr_t &sa,
-         unsigned addr_slot,
-         const SocketOptions &opt,
+			unsigned addr_slot,
+			const SocketOptions &opt,
 @@ -232,7 +552,6 @@
    if (listen_sd < 0) {
      return -errno;
@@ -548,19 +548,19 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
    if (r < 0) {
      r = -errno;
 -    ldout(cct, 10) << __func__ << " unable to bind to " << sa.get_sockaddr()
-+    ldout(cct, 3) << __func__ << " unable to bind to " <<sa.get_sockaddr()
++    ldout(cct, 3) << __func__ << " unable to bind to " << sa.get_sockaddr()
                     << ": " << cpp_strerror(r) << dendl;
      ::close(listen_sd);
      return r;
 @@ -264,13 +583,12 @@
-
+ 
    *sock = ServerSocket(
            std::unique_ptr<PosixServerSocketImpl>(
--      new PosixServerSocketImpl(net, listen_sd, sa, addr_slot)));
-+      new PosixServerSocketImpl(net, listen_sd, sa, addr_slot, ctx, cct)));
+-	    new PosixServerSocketImpl(net, listen_sd, sa, addr_slot)));
++	    new PosixServerSocketImpl(net, listen_sd, sa, addr_slot, ctx, cct)));
    return 0;
  }
-
+ 
  int PosixWorker::connect(const entity_addr_t &addr, const SocketOptions &opts, ConnectedSocket *socket) {
    int sd;
 -
@@ -569,8 +569,8 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
    } else {
 @@ -282,8 +600,32 @@
    }
-
-   net.set_priority(sd ,opts.priority, addr.get_family());
+ 
+   net.set_priority(sd, opts.priority, addr.get_family());
 -  *socket = ConnectedSocket(
 +
 +  ldout(cct, 3) << "fd:" <<  sd  << "connect port: "  << addr.get_port() << " tlsStatus " << tlsParam.tlsStatus <<dendl;
@@ -581,7 +581,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
 +        return -errno;
 +    }
 +    ldout(cct, 3) << "SSL Version: " << SSL_get_version(sslNew)  << dendl;
-+    if (SSL_set_fd(sslNew,sd) <= 0) {
++    if (SSL_set_fd(sslNew, sd) <= 0) {
 +      lderr(cct) << __func__ << " ctx set fd failed "  << dendl;
 +      return -errno;
 +    }
@@ -600,30 +600,30 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
 +  }
    return 0;
  }
-
+ 
 diff -Naru ceph-14.2.8/src/msg/async/PosixStack.h ceph-14.2.8tls/src/msg/async/PosixStack.h
 --- ceph-14.2.8/src/msg/async/PosixStack.h   2020-03-03 01:49:20.000000000 +0800
 +++ ceph-14.2.8tls/src/msg/async/PosixStack.h   2021-12-18 17:49:45.036746610 +0800
 @@ -18,18 +18,31 @@
  #define CEPH_MSG_ASYNC_POSIXSTACK_H
-
+ 
  #include <thread>
 +#include <openssl/ssl.h>
 +#include <openssl/err.h>
 +#include <openssl/x509.h>
 +#include <openssl/pem.h>
 +#include <openssl/evp.h>
-+#include <openssl/rsa.h>
++#include <openssl/rsa.h>    
 +#include <openssl/crypto.h>
 +#include <openssl/rand.h>
-
+ 
  #include "msg/msg_types.h"
  #include "msg/async/net_handler.h"
-
+ 
  #include "Stack.h"
 +#include "cert_ceph.h"
 +
-
+ 
  class PosixWorker : public Worker {
    NetHandler net;
    void initialize() override;
@@ -636,21 +636,21 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.h ceph-14.2.8tls/src/msg/async/P
 +      : Worker(c, i), net(c) , ctx(ctx), tlsParam(tlsParam){
 +      }
    int listen(entity_addr_t &sa,
-        unsigned addr_slot,
-        const SocketOptions &opt,
+ 	     unsigned addr_slot,
+ 	     const SocketOptions &opt,
 diff -Naru ceph-14.2.8/src/msg/async/Stack.cc ceph-14.2.8tls/src/msg/async/Stack.cc
 --- ceph-14.2.8/src/msg/async/Stack.cc 2020-03-03 01:49:20.000000000 +0800
 +++ ceph-14.2.8tls/src/msg/async/Stack.cc 2021-12-18 17:49:50.400746610 +0800
 @@ -29,11 +29,14 @@
-
+ 
  #include "common/dout.h"
  #include "include/ceph_assert.h"
 +#include "cert_ceph.h"
-
+ 
  #define dout_subsys ceph_subsys_ms
  #undef dout_prefix
  #define dout_prefix *_dout << "stack "
-
+ 
 +extern int g_connect_count;
 +
  std::function<void ()> NetworkStack::add_thread(unsigned i)
@@ -659,7 +659,7 @@ diff -Naru ceph-14.2.8/src/msg/async/Stack.cc ceph-14.2.8tls/src/msg/async/Stack
 @@ -82,10 +85,10 @@
    return nullptr;
  }
-
+ 
 -Worker* NetworkStack::create_worker(CephContext *c, const string &type, unsigned i)
 +Worker* NetworkStack::create_worker(CephContext *c, const string &type, unsigned i, SSL_CTX *ctx, certParam_t tlsParam)
  {
@@ -672,7 +672,7 @@ diff -Naru ceph-14.2.8/src/msg/async/Stack.cc ceph-14.2.8tls/src/msg/async/Stack
 @@ -105,6 +108,21 @@
  {
    ceph_assert(cct->_conf->ms_async_op_threads > 0);
-
+ 
 +  tlsParam = {0};
 +  if (certParamInit(&tlsParam) != 0) {
 +    lderr(cct) << __func__ << " tlsParam init failed "  << dendl;
@@ -693,7 +693,7 @@ diff -Naru ceph-14.2.8/src/msg/async/Stack.cc ceph-14.2.8tls/src/msg/async/Stack
    if (num_workers >= EventCenter::MAX_EVENTCENTER) {
 @@ -116,7 +134,7 @@
    }
-
+ 
    for (unsigned i = 0; i < num_workers; ++i) {
 -    Worker *w = create_worker(cct, type, i);
 +    Worker *w = create_worker(cct, type, i, ctx, tlsParam);
@@ -708,7 +708,7 @@ diff -Naru ceph-14.2.8/src/msg/async/Stack.h ceph-14.2.8tls/src/msg/async/Stack.
  #include "msg/msg_types.h"
  #include "msg/async/Event.h"
 +#include "cert_ceph.h"
-
+ 
  class Worker;
  class ConnectedSocketImpl {
 @@ -308,21 +309,27 @@
@@ -717,7 +717,7 @@ diff -Naru ceph-14.2.8/src/msg/async/Stack.h ceph-14.2.8tls/src/msg/async/Stack.
    vector<Worker*> workers;
 +  SSL_CTX *ctx;
 +  certParam_t tlsParam;
-
+ 
    explicit NetworkStack(CephContext *c, const string &t);
   public:
    NetworkStack(const NetworkStack &) = delete;
@@ -731,10 +731,10 @@ diff -Naru ceph-14.2.8/src/msg/async/Stack.h ceph-14.2.8tls/src/msg/async/Stack.
 +      SSL_CTX_free(ctx);
 +    }
    }
-
+ 
    static std::shared_ptr<NetworkStack> create(
            CephContext *c, const string &type);
-
+ 
    static Worker* create_worker(
 -          CephContext *c, const string &t, unsigned i);
 +          CephContext *c, const string &t, unsigned i, SSL_CTX *ctx, certParam_t tlsParam);
