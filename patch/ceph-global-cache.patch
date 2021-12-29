@@ -1,5 +1,5 @@
 diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
-index 28ec9835f85..fb698f48ae7 100644
+index 28ec9835..fb698f48 100644
 --- a/src/CMakeLists.txt
 +++ b/src/CMakeLists.txt
 @@ -103,6 +103,11 @@ if(HAVE_INTEL)
@@ -40,7 +40,7 @@ index 28ec9835f85..fb698f48ae7 100644
  if(WITH_TESTS)
 diff --git a/src/client_adaptor/CMakeLists.txt b/src/client_adaptor/CMakeLists.txt
 new file mode 100644
-index 00000000000..17c30787fc5
+index 00000000..17c30787
 --- /dev/null
 +++ b/src/client_adaptor/CMakeLists.txt
 @@ -0,0 +1,17 @@
@@ -63,15 +63,15 @@ index 00000000000..17c30787fc5
 +
 diff --git a/src/client_adaptor/ClientAdaptorMgr.cc b/src/client_adaptor/ClientAdaptorMgr.cc
 new file mode 100644
-index 00000000000..174e153c40c
+index 00000000..6535968e
 --- /dev/null
 +++ b/src/client_adaptor/ClientAdaptorMgr.cc
 @@ -0,0 +1,123 @@
-+/*
-+*
-+*
-+*
-+*/
++/* License:LGPL-2.1
++ *
++ * Copyright (c) 2021 Huawei Technologies Co., Ltf All rights reserved.
++ *
++ */
 +
 +#include <iostream>
 +#include "ClientAdaptorMgr.h"
@@ -192,10 +192,16 @@ index 00000000000..174e153c40c
 +}
 diff --git a/src/client_adaptor/ClientAdaptorMgr.h b/src/client_adaptor/ClientAdaptorMgr.h
 new file mode 100644
-index 00000000000..35939de3513
+index 00000000..2475605f
 --- /dev/null
 +++ b/src/client_adaptor/ClientAdaptorMgr.h
-@@ -0,0 +1,111 @@
+@@ -0,0 +1,117 @@
++/* License:LGPL-2.1
++ *
++ * Copyright (c) 2021 Huawei Technologies Co., Ltf All rights reserved.
++ *
++ */
++
 +#ifndef CLIENT_ADAPTOR_MGR_H
 +#define CLIENT_ADAPTOR_MGR_H
 +
@@ -309,10 +315,16 @@ index 00000000000..35939de3513
 +#endif
 diff --git a/src/client_adaptor/ClientAdaptorMsg.cc b/src/client_adaptor/ClientAdaptorMsg.cc
 new file mode 100644
-index 00000000000..0d87835131a
+index 00000000..7c7da3ba
 --- /dev/null
 +++ b/src/client_adaptor/ClientAdaptorMsg.cc
-@@ -0,0 +1,285 @@
+@@ -0,0 +1,291 @@
++/* License:LGPL-2.1
++ *
++ * Copyright (c) 2021 Huawei Technologies Co., Ltf All rights reserved.
++ *
++ */
++
 +#include <iostream>
 +#include <regex>
 +#include "ClientAdaptorMsg.h"
@@ -600,10 +612,16 @@ index 00000000000..0d87835131a
 +
 diff --git a/src/client_adaptor/ClientAdaptorMsg.h b/src/client_adaptor/ClientAdaptorMsg.h
 new file mode 100644
-index 00000000000..c8661f8d89c
+index 00000000..88e8b4e8
 --- /dev/null
 +++ b/src/client_adaptor/ClientAdaptorMsg.h
-@@ -0,0 +1,72 @@
+@@ -0,0 +1,78 @@
++/* License:LGPL-2.1
++ *
++ * Copyright (c) 2021 Huawei Technologies Co., Ltf All rights reserved.
++ *
++ */
++
 +#ifndef CLIENT_ADAPTOR_MSG_H
 +#define CLIENT_ADAPTOR_MSG_H
 +
@@ -678,10 +696,16 @@ index 00000000000..c8661f8d89c
 +#endif
 diff --git a/src/client_adaptor/ClientAdaptorPerf.cc b/src/client_adaptor/ClientAdaptorPerf.cc
 new file mode 100644
-index 00000000000..b5fa9f532b4
+index 00000000..58e012ad
 --- /dev/null
 +++ b/src/client_adaptor/ClientAdaptorPerf.cc
-@@ -0,0 +1,83 @@
+@@ -0,0 +1,89 @@
++/* License:LGPL-2.1
++ *
++ * Copyright (c) 2021 Huawei Technologies Co., Ltf All rights reserved.
++ *
++ */
++
 +#include "ClientAdaptorPerf.h"
 +#include "ClientAdaptorPlugin.h"
 +using namespace std;
@@ -767,10 +791,16 @@ index 00000000000..b5fa9f532b4
 +
 diff --git a/src/client_adaptor/ClientAdaptorPerf.h b/src/client_adaptor/ClientAdaptorPerf.h
 new file mode 100644
-index 00000000000..4996d952108
+index 00000000..7a5b55d9
 --- /dev/null
 +++ b/src/client_adaptor/ClientAdaptorPerf.h
-@@ -0,0 +1,50 @@
+@@ -0,0 +1,56 @@
++/* License:LGPL-2.1
++ *
++ * Copyright (c) 2021 Huawei Technologies Co., Ltf All rights reserved.
++ *
++ */
++
 +#ifndef CLIENT_ADAPTOR_PERF_H
 +#define CLIENT_ADAPTOR_PERF_H
 +
@@ -823,10 +853,16 @@ index 00000000000..4996d952108
 +
 diff --git a/src/client_adaptor/ClientAdaptorPlugin.cc b/src/client_adaptor/ClientAdaptorPlugin.cc
 new file mode 100644
-index 00000000000..77a1e686a99
+index 00000000..8fbfdf8d
 --- /dev/null
 +++ b/src/client_adaptor/ClientAdaptorPlugin.cc
-@@ -0,0 +1,39 @@
+@@ -0,0 +1,45 @@
++/* License:LGPL-2.1
++ *
++ * Copyright (c) 2021 Huawei Technologies Co., Ltf All rights reserved.
++ *
++ */
++
 +#include <iostream>
 +#include "ClientAdaptorPlugin.h"
 +#include "ceph_ver.h"
@@ -868,10 +904,16 @@ index 00000000000..77a1e686a99
 +}
 diff --git a/src/client_adaptor/ClientAdaptorPlugin.h b/src/client_adaptor/ClientAdaptorPlugin.h
 new file mode 100644
-index 00000000000..8685aad8ee2
+index 00000000..2337ea6a
 --- /dev/null
 +++ b/src/client_adaptor/ClientAdaptorPlugin.h
-@@ -0,0 +1,33 @@
+@@ -0,0 +1,39 @@
++/* License:LGPL-2.1
++ *
++ * Copyright (c) 2021 Huawei Technologies Co., Ltf All rights reserved.
++ *
++ */
++
 +#ifndef CLIENT_ADAPTOR_PLUGIN_H
 +#define CLIENT_ADAPTOR_PLUGIN_H
 +#include <unistd.h>
@@ -907,10 +949,26 @@ index 00000000000..8685aad8ee2
 +#endif
 diff --git a/src/client_adaptor/open_ccm.h b/src/client_adaptor/open_ccm.h
 new file mode 100644
-index 00000000000..d735594947f
+index 00000000..68d57b4e
 --- /dev/null
 +++ b/src/client_adaptor/open_ccm.h
-@@ -0,0 +1,143 @@
+@@ -0,0 +1,159 @@
++/*
++* Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
++*
++* Licensed under the Apache License, Version 2.0 (the "License");
++* you may not use this file except in compliance with the License.
++* You may obtain a copy of the License at
++*
++*	http://www.apache.org/licenses/LICENSE-2.0
++* 
++* Unless required by applicable law or agreed to in writing, software
++* distributed under the License is distributed on an "AS IS" BASIS,
++* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++* See the License for the specific language governing permissions and
++* limitations under the License.
++*/
++
 +#ifndef __CCM_INTERFACE_H__
 +#define __CCM_INTERFACE_H__
 +
@@ -1054,13 +1112,28 @@ index 00000000000..d735594947f
 +#endif
 +
 +#endif // __CCM_INTERFACE_H__
-\ No newline at end of file
 diff --git a/src/client_adaptor/open_das.h b/src/client_adaptor/open_das.h
 new file mode 100644
-index 00000000000..8d2d233c964
+index 00000000..16002954
 --- /dev/null
 +++ b/src/client_adaptor/open_das.h
-@@ -0,0 +1,52 @@
+@@ -0,0 +1,68 @@
++/*
++* Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
++*
++* Licensed under the Apache License, Version 2.0 (the "License");
++* you may not use this file except in compliance with the License.
++* You may obtain a copy of the License at
++*
++*	http://www.apache.org/licenses/LICENSE-2.0
++* 
++* Unless required by applicable law or agreed to in writing, software
++* distributed under the License is distributed on an "AS IS" BASIS,
++* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++* See the License for the specific language governing permissions and
++* limitations under the License.
++*/
++
 +#ifndef OPEN_DAS_H
 +#define OPEN_DAS_H
 +
@@ -1114,7 +1187,7 @@ index 00000000000..8d2d233c964
 +
 +#endif // OPEN_DAS_H
 diff --git a/src/common/options.cc b/src/common/options.cc
-index 8135ea8f1eb..fb9215e3a9b 100644
+index 8135ea8f..fb9215e3 100644
 --- a/src/common/options.cc
 +++ b/src/common/options.cc
 @@ -1014,9 +1014,15 @@ std::vector<Option> get_global_options() {
@@ -1203,7 +1276,7 @@ index 8135ea8f1eb..fb9215e3a9b 100644
  }
  
 diff --git a/src/include/config-h.in.cmake b/src/include/config-h.in.cmake
-index d83a59b2c56..12dfdf5e611 100644
+index d83a59b2..12dfdf5e 100644
 --- a/src/include/config-h.in.cmake
 +++ b/src/include/config-h.in.cmake
 @@ -187,6 +187,9 @@
@@ -1217,7 +1290,7 @@ index d83a59b2c56..12dfdf5e611 100644
  #cmakedefine HAVE_BABELTRACE_BABELTRACE_H 1
  
 diff --git a/src/librbd/ImageCtx.cc b/src/librbd/ImageCtx.cc
-index 8375d1a6390..68983334297 100644
+index 8375d1a6..68983334 100644
 --- a/src/librbd/ImageCtx.cc
 +++ b/src/librbd/ImageCtx.cc
 @@ -270,6 +270,18 @@ public:
@@ -1240,7 +1313,7 @@ index 8375d1a6390..68983334297 100644
      plb.add_u64_counter(l_librbd_discard_bytes, "discard_bytes", "Discarded data", NULL, 0, unit_t(UNIT_BYTES));
      plb.add_time_avg(l_librbd_discard_latency, "discard_latency", "Discard latency");
 diff --git a/src/librbd/Types.h b/src/librbd/Types.h
-index 3f1104478eb..e33023fb79c 100644
+index 3f110447..e33023fb 100644
 --- a/src/librbd/Types.h
 +++ b/src/librbd/Types.h
 @@ -22,6 +22,14 @@ enum {
@@ -1259,7 +1332,7 @@ index 3f1104478eb..e33023fb79c 100644
    l_librbd_discard_bytes,
    l_librbd_discard_latency,
 diff --git a/src/librbd/io/ImageDispatchSpec.h b/src/librbd/io/ImageDispatchSpec.h
-index 93c53a0fe8b..7551fb0c06e 100644
+index 93c53a0f..7551fb0c 100644
 --- a/src/librbd/io/ImageDispatchSpec.h
 +++ b/src/librbd/io/ImageDispatchSpec.h
 @@ -121,7 +121,11 @@ public:
@@ -1276,7 +1349,7 @@ index 93c53a0fe8b..7551fb0c06e 100644
    void fail(int r);
  
 diff --git a/src/librbd/io/ImageRequestWQ.cc b/src/librbd/io/ImageRequestWQ.cc
-index 34f2c2cf2ba..cae0341ac6d 100644
+index 34f2c2cf..cae0341a 100644
 --- a/src/librbd/io/ImageRequestWQ.cc
 +++ b/src/librbd/io/ImageRequestWQ.cc
 @@ -286,7 +286,13 @@ void ImageRequestWQ<I>::aio_read(AioCompletion *c, uint64_t off, uint64_t len,
@@ -1337,7 +1410,7 @@ index 34f2c2cf2ba..cae0341ac6d 100644
    ThreadPool::PointerWQ<ImageDispatchSpec<I> >::queue(req);
  }
 diff --git a/src/msg/Message.cc b/src/msg/Message.cc
-index d36a95ebe2d..e5384c3e5ca 100644
+index d36a95eb..e5384c3e 100644
 --- a/src/msg/Message.cc
 +++ b/src/msg/Message.cc
 @@ -202,6 +202,8 @@
@@ -1365,7 +1438,7 @@ index d36a95ebe2d..e5384c3e5ca 100644
    }
    trace.keyval("tid", get_tid());
 diff --git a/src/msg/async/ProtocolV2.cc b/src/msg/async/ProtocolV2.cc
-index 4b03f5ebcf4..7bc18292232 100644
+index 4b03f5eb..7bc18292 100644
 --- a/src/msg/async/ProtocolV2.cc
 +++ b/src/msg/async/ProtocolV2.cc
 @@ -13,6 +13,12 @@
@@ -1474,7 +1547,7 @@ index 4b03f5ebcf4..7bc18292232 100644
    session_stream_handlers = \
      ceph::crypto::onwire::rxtx_t::create_handler_pair(cct, *auth_meta, false);
 diff --git a/src/osdc/Objecter.cc b/src/osdc/Objecter.cc
-index bc39114ac59..819804bcfdb 100644
+index bc39114a..badeb02f 100644
 --- a/src/osdc/Objecter.cc
 +++ b/src/osdc/Objecter.cc
 @@ -51,6 +51,18 @@
@@ -2207,7 +2280,7 @@ index bc39114ac59..819804bcfdb 100644
        // says the osd down
        if (!(initialized && osdmap->is_up(session->osd))) {
 diff --git a/src/osdc/Objecter.h b/src/osdc/Objecter.h
-index ca8d85f7ac1..918b41c1722 100644
+index ca8d85f7..918b41c1 100644
 --- a/src/osdc/Objecter.h
 +++ b/src/osdc/Objecter.h
 @@ -1341,7 +1341,13 @@ public:
@@ -2291,7 +2364,7 @@ index ca8d85f7ac1..918b41c1722 100644
    /**
     * Tell the objecter to throttle outgoing ops according to its
 diff --git a/src/test/CMakeLists.txt b/src/test/CMakeLists.txt
-index 5dcee1694d1..fc342ccb90d 100644
+index 5dcee169..fc342ccb 100644
 --- a/src/test/CMakeLists.txt
 +++ b/src/test/CMakeLists.txt
 @@ -31,6 +31,13 @@ add_subdirectory(fs)
@@ -2310,7 +2383,7 @@ index 5dcee1694d1..fc342ccb90d 100644
    add_subdirectory(libradosstriper)
 diff --git a/src/test/ClientAdaptorTest/CMakeLists.txt b/src/test/ClientAdaptorTest/CMakeLists.txt
 new file mode 100644
-index 00000000000..2eb494c3375
+index 00000000..2eb494c3
 --- /dev/null
 +++ b/src/test/ClientAdaptorTest/CMakeLists.txt
 @@ -0,0 +1,11 @@
@@ -2327,10 +2400,16 @@ index 00000000000..2eb494c3375
 +message(STATUS "Client adaptor test cmake executing...")
 diff --git a/src/test/ClientAdaptorTest/ClientAdaptorTest.cc b/src/test/ClientAdaptorTest/ClientAdaptorTest.cc
 new file mode 100644
-index 00000000000..21a8ae73f83
+index 00000000..c6bede97
 --- /dev/null
 +++ b/src/test/ClientAdaptorTest/ClientAdaptorTest.cc
-@@ -0,0 +1,379 @@
+@@ -0,0 +1,385 @@
++/* License:LGPL-2.1
++ *
++ * Copyright (c) 2021 Huawei Technologies Co., Ltf All rights reserved.
++ *
++ */
++
 +#include <iostream>
 +#include <string.h>
 +#include <iomanip>
@@ -2712,7 +2791,7 @@ index 00000000000..21a8ae73f83
 +);  
 diff --git a/src/test/ServerAdaptorSimulate/CMakeLists.txt b/src/test/ServerAdaptorSimulate/CMakeLists.txt
 new file mode 100644
-index 00000000000..547e1dd9257
+index 00000000..547e1dd9
 --- /dev/null
 +++ b/src/test/ServerAdaptorSimulate/CMakeLists.txt
 @@ -0,0 +1,9 @@
@@ -2727,10 +2806,26 @@ index 00000000000..547e1dd9257
 +)
 diff --git a/src/test/ServerAdaptorSimulate/global_cache_dispatcher.cc b/src/test/ServerAdaptorSimulate/global_cache_dispatcher.cc
 new file mode 100644
-index 00000000000..baa2d8851e6
+index 00000000..bd249272
 --- /dev/null
 +++ b/src/test/ServerAdaptorSimulate/global_cache_dispatcher.cc
-@@ -0,0 +1,150 @@
+@@ -0,0 +1,166 @@
++/*
++* Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
++*
++* Licensed under the Apache License, Version 2.0 (the "License");
++* you may not use this file except in compliance with the License.
++* You may obtain a copy of the License at
++*
++*	http://www.apache.org/licenses/LICENSE-2.0
++* 
++* Unless required by applicable law or agreed to in writing, software
++* distributed under the License is distributed on an "AS IS" BASIS,
++* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++* See the License for the specific language governing permissions and
++* limitations under the License.
++*/
++
 +#include <string>
 +#include <iostream>
 +#include <iomanip>
@@ -2883,23 +2978,25 @@ index 00000000000..baa2d8851e6
 +}    // nothing
 diff --git a/src/test/ServerAdaptorSimulate/global_cache_dispatcher.h b/src/test/ServerAdaptorSimulate/global_cache_dispatcher.h
 new file mode 100644
-index 00000000000..b2ce4390115
+index 00000000..b503739c
 --- /dev/null
 +++ b/src/test/ServerAdaptorSimulate/global_cache_dispatcher.h
-@@ -0,0 +1,108 @@
-+
-+
-+
-+
-+
-+
-+
-+
-+
-+
-+
-+
-+
+@@ -0,0 +1,110 @@
++/*
++* Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
++*
++* Licensed under the Apache License, Version 2.0 (the "License");
++* you may not use this file except in compliance with the License.
++* You may obtain a copy of the License at
++*
++*	http://www.apache.org/licenses/LICENSE-2.0
++* 
++* Unless required by applicable law or agreed to in writing, software
++* distributed under the License is distributed on an "AS IS" BASIS,
++* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++* See the License for the specific language governing permissions and
++* limitations under the License.
++*/
 +
 +#ifndef GLOBAL_CACHE_DISPATCHER_H_
 +#define GLOBAL_CACHE_DISPATCHER_H_
@@ -2997,23 +3094,23 @@ index 00000000000..b2ce4390115
 +
 diff --git a/src/test/ServerAdaptorSimulate/global_cache_server.cc b/src/test/ServerAdaptorSimulate/global_cache_server.cc
 new file mode 100644
-index 00000000000..486825aa648
+index 00000000..6a1f0e4b
 --- /dev/null
 +++ b/src/test/ServerAdaptorSimulate/global_cache_server.cc
 @@ -0,0 +1,131 @@
-+
-+
-+
-+
-+
-+
-+
-+
-+
-+
-+
-+
-+
++// -*- mode:C++; tab-width:8; c-basc-offset:2; indent-tabs-mode:t -*-
++// vim: ts=8 sw=2 smarttab
++/*
++ * Ceph - scalable distributed file system
++ *
++ * Copyright (C) 2013 CohortFS, LLC
++ *
++ * This is free software; you can redistribute it and/or
++ * modify it under the terms og the GNU Lesser General Public
++ * License version 2.1, as published by the Free Software
++ * Foundation. See file COPYING.
++ *
++ */
 +
 +#include <sys/types.h>
 +
@@ -3133,7 +3230,7 @@ index 00000000000..486825aa648
 +    return r;
 +}
 diff --git a/src/test/librbd/io/test_mock_ImageRequestWQ.cc b/src/test/librbd/io/test_mock_ImageRequestWQ.cc
-index 50daa83c777..209740a8d07 100644
+index 50daa83c..209740a8 100644
 --- a/src/test/librbd/io/test_mock_ImageRequestWQ.cc
 +++ b/src/test/librbd/io/test_mock_ImageRequestWQ.cc
 @@ -58,6 +58,11 @@ struct ImageDispatchSpec<librbd::MockTestImageCtx> {
@@ -3149,7 +3246,7 @@ index 50daa83c777..209740a8d07 100644
    MOCK_CONST_METHOD0(start_op, void());
    MOCK_CONST_METHOD0(send, void());
 diff --git a/src/test/messenger/simple_client.cc b/src/test/messenger/simple_client.cc
-index ba7ed2b0966..8b1eee76049 100644
+index ba7ed2b0..8b1eee76 100644
 --- a/src/test/messenger/simple_client.cc
 +++ b/src/test/messenger/simple_client.cc
 @@ -30,6 +30,7 @@ using namespace std;
@@ -3238,7 +3335,7 @@ index ba7ed2b0966..8b1eee76049 100644
  
  	// do stuff
 diff --git a/src/test/messenger/simple_dispatcher.cc b/src/test/messenger/simple_dispatcher.cc
-index b13958d3686..7e1011bbd60 100644
+index b13958d3..7e1011bb 100644
 --- a/src/test/messenger/simple_dispatcher.cc
 +++ b/src/test/messenger/simple_dispatcher.cc
 @@ -17,6 +17,8 @@
@@ -3298,7 +3395,7 @@ index b13958d3686..7e1011bbd60 100644
    //m->put();
  
 diff --git a/src/test/messenger/simple_server.cc b/src/test/messenger/simple_server.cc
-index 8b85f3afbcf..34feff15552 100644
+index 8b85f3af..34feff15 100644
 --- a/src/test/messenger/simple_server.cc
 +++ b/src/test/messenger/simple_server.cc
 @@ -28,6 +28,8 @@ using namespace std;
@@ -3353,7 +3450,7 @@ index 8b85f3afbcf..34feff15552 100644
  
  	// done
 diff --git a/src/vstart.sh b/src/vstart.sh
-index 37aa28b7375..a146de36a55 100755
+index 37aa28b7..a146de36 100755
 --- a/src/vstart.sh
 +++ b/src/vstart.sh
 @@ -752,6 +752,8 @@ EOF
