@@ -190,7 +190,7 @@ int RadosClientInit(rados_client_t *client,const std::string &cephConf)
 
 	ret = rados->conf_set(LOG_FILE_NAME, ProxyGetLogPath());
 	if (ret != 0) {
-		 ProxyDbgLogErr("set log<%s, %s> failed: %d", LOG_FILE_NAME, ProxyGetLogPath());
+		 ProxyDbgLogErr("set log<%s, %s> failed: %d", LOG_FILE_NAME, ProxyGetLogPath(), ret);
 		 goto client_init_out;
 	}
         ProxyDbgLogInfo("set config<%s, %s> success.", LOG_FILE_NAME, ProxyGetLogPath());

@@ -44,7 +44,11 @@ bool SaServerDispatcher::ms_dispatch(Message *m)
 	   con->send_message(m);
        } break;
        case CEPH_MSG_OSD_OP: {
-	    MOSDOp *osdOp = static_cast<MOSDOp *>(m);
+	    MOSDOp *osdOp = dynamic_cast<MOSDOp *>(m);
+	    if (osdOp == nullptr) {
+                Salog(LV_ERROR, LOG_TYPE, "Critical error, Message from client is not MOSDOp!");
+		return true;
+	    }
 	    Salog(LV_DEBUG, LOG_TYPE, "Recive MOSDOp, prepare to enqueue.");
 	    ptrNetworkModule->EnqueueClientop(osdOp);
 	} break;

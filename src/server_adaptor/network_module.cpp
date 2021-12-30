@@ -1,7 +1,7 @@
 /* License:LGPL-2.1
  *
- * Copyright (c) Huawei Technologies Co., Ltd. 2021-2021. All rights reserved.
- * Description: Interact with Messanger(ClientAdaptor) and CCM agent.
+ * Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
+ * 
  */
 
 #include "network_module.h"
@@ -99,11 +99,19 @@ int NetworkModule::InitMessenger()
 {
     int ret = 0;
     startServerThread = true;
-    ret = pthread_create(&serverThread, nullptr, ThreadServer, this);
-    if (ret) {
-        Salog(LV_DEBUG, LOG_TYPE, "Creating ThreadServer is failed ret=%d", ret);
-        startServerThread = false;
-        return ret;
+    try {
+        ret = pthread_create(&serverThread, nullptr, ThreadServer, this);
+        if (ret) {
+            Salog(LV_ERROR, LOG_TYPE, "Creating ThreadServer is failed ret=%d", ret);
+            startServerThread = false;
+            return ret;
+	}
+    } catch (const std::system_error& e) {
+	ret = 200;
+	Salog(LV_ERROR, LOG_TYPE, "std::system_error %s", e.what());
+    } catch (const std::exception& e) {
+	ret = 200;
+	Salog(LV_ERROR, LOG_TYPE, "std::exception %s", e.what());
     }
     return ret;
 }
@@ -440,7 +448,15 @@ void NetworkModule::CreateWorkThread(uint32_t qnum, uint32_t portAmout, uint32_t
         finishThread.push_back(false);
         opDispatcher.push_back(new ClientOpQueue());
 	int cpuNum = saCoreId[i % saCoreId.size()];
+	try {
         doOpThread.push_back(thread(ThreadFunc, this, i, cpuNum));
+        } catch (const std::system_error& e) {
+	    Salog(LV_ERROR, LOG_TYPE, "std::system_error %s", e.what());
+	    ceph_assert("Create thread catch std::ystem_error" == nullptr);
+        } catch (const std::exception& e) {
+	    Salog(LV_ERROR, LOG_TYPE, "std::exception %s", e.what());
+	    ceph_assert("Create thread catch std::exception" == nullptr);
+     	}
     }
     Salog(LV_WARNING, LOG_TYPE, "CreateWorkThread %d %d", queueNum, qmaxcapacity);
 }
@@ -448,7 +464,13 @@ void NetworkModule::CreateWorkThread(uint32_t qnum, uint32_t portAmout, uint32_t
 void NetworkModule::StopThread()
 {
     for (uint32_t i = 0; i < finishThread.size(); i++) {
-        std::unique_lock<std::mutex> opReqLock(opDispatcher[i]->opQueueMutex);
+	try {
+            std::unique_lock<std::mutex> opReqLock(opDispatcher[i]->opQueueMutex);
+            } catch (const std::system_error& e) {
+	        Salog(LV_ERROR, LOG_TYPE, "std::system_error %s", e.what());
+            } catch (const std::exception& e) {
+	        Salog(LV_ERROR, LOG_TYPE, "std::exception %s", e.what());
+	    }
         finishThread[i] = true;
     }
 
@@ -492,7 +514,18 @@ void NetworkModule::OpHandlerThread(int threadNum, int coreId)
     std::queue<MOSDOp *> dealQueue;
     std::queue<uint64_t> dealTs;
     std::queue<uint64_t> periodTs; 
-    std::unique_lock<std::mutex> opReqLock(opDispatch->opQueueMutex);
+    std::unique_lock<std::mutex> opReqLock;
+    try {
+	opReqLock = std::unique_lock<std::mutex>(opDispatch->opQueueMutex);
+    } catch (const std::system_error& e) {
+	Salog(LV_ERROR, LOG_TYPE, "std::system_error %s", e.what());
+	sleep(1);
+	ceph_assert("Lock queue mutex catch std::ystem_error 1" == nullptr);
+    } catch (const std::exception& e) {
+	Salog(LV_ERROR, LOG_TYPE, "std::exception %s", e.what());
+	sleep(1);
+	ceph_assert("Lock queue mutex catch std::exception 1" == nullptr);
+    }
     while (!finishThread[threadId]) {
         if (!opDispatch->Empty()) {
             opDispatch->reqQueue.swap(dealQueue);
@@ -500,7 +533,17 @@ void NetworkModule::OpHandlerThread(int threadNum, int coreId)
 	    opDispatch->tsQueue.swap(dealTs);
 	    opDispatch->period.swap(periodTs);
 	    opDispatch->cond.notify_all();
-            opReqLock.unlock();
+	    try {
+                opReqLock.unlock();
+            } catch (const std::system_error& e) {
+	        Salog(LV_ERROR, LOG_TYPE, "std::system_error %s", e.what());
+	        sleep(1);
+	        ceph_assert("Unlock queue mutex catch std::ystem_error 1" == nullptr);
+            } catch (const std::exception& e) {
+	        Salog(LV_ERROR, LOG_TYPE, "std::exception %s", e.what());
+	        sleep(1);
+	        ceph_assert("Unlock queue mutex catch std::exception 1" == nullptr);
+  	    }
             //
             while (!dealQueue.empty()) {
                 MOSDOp *op = dealQueue.front();
@@ -572,13 +615,33 @@ void NetworkModule::OpHandlerThread(int threadNum, int coreId)
             }
 	    uint64_t lockTsOne = 0;
 	    sa->FtdsStartHigh(SA_FTDS_LOCK_ONE, lockTsOne);
-            opReqLock.lock();
+	    try {
+                opReqLock.lock();
+            } catch (const std::system_error& e) {
+	        Salog(LV_ERROR, LOG_TYPE, "std::system_error %s", e.what());
+	        sleep(1);
+	        ceph_assert("Lock queue mutex catch std::ystem_error 1" == nullptr);
+            } catch (const std::exception& e) {
+	        Salog(LV_ERROR, LOG_TYPE, "std::exception %s", e.what());
+	        sleep(1);
+	        ceph_assert("Lock queue mutex catch std::exception 1" == nullptr);
+            }
 	    sa->FtdsEndHigt(SA_FTDS_LOCK_ONE, lockTsOne, 0);
             continue;
         }
-        opDispatch->condOpReq.wait(opReqLock);
+	try {
+            opDispatch->condOpReq.wait(opReqLock);
+        } catch (const std::system_error& e) {
+	    Salog(LV_ERROR, LOG_TYPE, "std::system_error %s", e.what());
+	    sleep(1);
+	    ceph_assert("Unlock queue mutex catch std::ystem_error 1" == nullptr);
+        } catch (const std::exception& e) {
+	    Salog(LV_ERROR, LOG_TYPE, "std::exception %s", e.what());
+	    sleep(1);
+	    ceph_assert("Unlock queue mutex catch std::exception 1" == nullptr);
+  	}
     }
-    Salog(LV_DEBUG, "OpHandler", "OpHandlerThread  Finish");
+    Salog(LV_WARNING, "OpHandler", "OpHandlerThread  Finish");
 }
 
 uint32_t NetworkModule::EnqueueClientop(MOSDOp *opReq)

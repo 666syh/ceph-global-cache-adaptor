@@ -1,9 +1,9 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
-// vim: ts=8 sw-2 smarttab
+// vim: ts=8 sw=2 smarttab
 
 /*
- * 2021.08.28 - Modify Indentation. Modify a small amount of codes as GlobalCache neededdddddddddddddddddd.
- * 		Huawei Technologies Co., Ltd.<fiss@huawei.com>
+ * 2021.08.28 - Modify Indentation. Modify a small amount of codes as GlobalCache needed.
+ * 		Huawei Technologies Co., Ltd.<foss@huawei.com>
  */
 
 #include "include/types.h"
