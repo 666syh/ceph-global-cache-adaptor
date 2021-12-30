@@ -1,0 +1,29 @@
+[Unit]
+Description=gcache rados gateway
+After=network-online.target local-fs.target time-sync.target
+Wants=network-online.target local-fs.target time-sync.target
+PartOf=gcache-radosgw.target
+
+[Service]
+LimitNOFILE=1048576
+LimitNPROC=1048576
+EnvironmentFile=-/etc/sysconfig/ceph
+Environment=CLUSTER=ceph LD_LIBRARY_PATH=/opt/gcache/radosgw/lib/:/opt/gcache/radosgw/lib/xnet:/opt/gcache/radosgw/lib/kmca:/opt/gcache/radosgw/lib/index:/opt/gcache/radosgw/lib/openssl:/opt/gcache/radosgw/third_part/lib
+ExecStart=/opt/gcache/radosgw/bin/radosgw -f --cluster ${CLUSTER} --name client.%i --setuser ceph --setgroup ceph
+LockPersonality=true
+MemoryDenyWriteExecute=true
+NoNewPrivileges=true
+PrivateDevices=yes
+ProtectControlGroups=true
+ProtectHome=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=full
+PrivateTmp=true
+TasksMax=infinity
+Restart=on-failure
+StartLimitInterval=30s
+StartLimitBurst=5
+
+[Install]
+WantedBy=gcache-radosgw.target

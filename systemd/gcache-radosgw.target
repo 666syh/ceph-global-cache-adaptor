@@ -1,0 +1,4 @@
+[Unit]
+Description=gcache target allowing to start/stop all gcache-radosgw@.service instances at once
+[Install]
+WantedBy=multi-user.target
