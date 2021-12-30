@@ -91,5 +91,4 @@ message(STATUS "LIBRARY DIRECTORY: ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}")
 
 #
 add_subdirectory(src)
-#add_subdirectory(test)
 

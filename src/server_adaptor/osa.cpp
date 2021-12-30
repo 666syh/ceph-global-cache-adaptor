@@ -122,7 +122,7 @@ int OSA_Init(SaExport &sa)
     InitSalog(sa);
     char curDate[128] = {0};
     memset(curDate, 0, sizeof(curDate));
-    string strDate = "1208-";
+    string strDate = "1230-";
     strcpy(curDate, strDate.c_str());
 #ifdef NDEBUG
     Salog(LV_WARNING, LOG_TYPE, "OSA Init %sR", curDate);

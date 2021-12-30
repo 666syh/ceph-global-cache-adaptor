@@ -1,7 +1,7 @@
 /*
  *
- * Copyright (c) Huawei Technologies Co., Ltd. 2021-2021. All rights reserved.
- * Description: Interact with Messanger(ClientAdaptor) and CCM agent.
+ * Copyright (c) Huawei 2021 Technologies Co., Ltd All rights reserved.
+ * 
  */
 
 #ifndef NETWORK_MODULE_H

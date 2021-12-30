@@ -17,37 +17,7 @@
 #ifndef __CEPH_PROXY_LOG_H__
 #define __CEPH_PROXY_LOG_H__
 
-#if defined DPAX_LOG
-#include "dplog.h"
-#ifndef MY_PID
-#define MY_PID 882
-#endif
-
-#define ProxyDbgCrit(format, ...)                    \
-	do {						\
-		GCI_LOGGER_CRITICAL(MYID, "[PROXY]" format, ##__VA_ARGS__);	\
-	} while(0)
-
-#define ProxyDbgLogErr(format, ...)                    \
-	do {						\
-		GCI_LOGGER_ERROR(MY_PID, "[PROXY]" format, ##__VA_ARGS__);	\
-	} while(0)
-
-#define ProxyDbgLogWarn(format, ...)                    \
-	do {						\
-		GCI_LOGGER_WARN(MY_PID, "[PROXY]" format, ##__VA_ARGS__);	\
-	} while(0)
-
-#define ProxyDbgLogInfo(format, ...)                    \
-	do {						\
-		GCI_LOGGER_INFO(MY_PID, "[PROXY]" format, ##__VA_ARGS__);	\
-	} while(0)
-
-#define ProxyDbgLogDebug(format, ...)                    \
-	do {						\
-		GCI_LOGGER_DEBUG(MY_PID, "[PROXY]" format, ##__VA_ARGS__);	\
-	} while(0)
-#elif defined SYS_LOG
+#if defined SYS_LOG
 #include <syslog.h>
 
 #define ProxyDbgCrit(format, ...)                    \

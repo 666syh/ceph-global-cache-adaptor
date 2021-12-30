@@ -1,9 +1,9 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
-// vim: ts=8 sw-2 smarttab
+// vim: ts=8 sw=2 smarttab
 
 /*
- * 2021.11.15 - Modify Function implementation as GlobalCache needed.
- * 		Huawei Technologies Co., Ltd.<fiss@huawei.com>
+ * 2021.11.15 - Modify function implementation as GlobalCache needed.
+ * 		Huawei Technologies Co., Ltd.<foss@huawei.com>
  */
 
 #include "common/config.h"

@@ -1,9 +1,9 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
-// vim: ts=8 sw-2 smarttab
+// vim: ts=8 sw=2 smarttab
 
 /*
  * 2021.08.28 - Modify Indentation.
- * 		Huawei Technologies Co., Ltd.<fiss@huawei.com>
+ * 		Huawei Technologies Co., Ltd.<foss@huawei.com>
  */
 
 #ifndef CEPH_CLASSHANDLER_H
