@@ -1,5 +1,5 @@
 diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
-index 28ec9835..fb698f48 100644
+index 28ec983..bf4aa6e 100644
 --- a/src/CMakeLists.txt
 +++ b/src/CMakeLists.txt
 @@ -103,6 +103,11 @@ if(HAVE_INTEL)
@@ -7,7 +7,7 @@ index 28ec9835..fb698f48 100644
  endif()
  
 +if(WITH_GLOBAL_CACHE)
-+set(third_part_dir ${CMAKE_SOURCE_DIR}/../third_part)
++set(third_part_dir /opt/gcache_adaptor_compile/third_part)
 +message(STATUS "third part directory --> " ${third_part_dir})
 +link_directories(${third_part_dir}/lib)
 +endif()
@@ -40,7 +40,7 @@ index 28ec9835..fb698f48 100644
  if(WITH_TESTS)
 diff --git a/src/client_adaptor/CMakeLists.txt b/src/client_adaptor/CMakeLists.txt
 new file mode 100644
-index 00000000000..17c30787fc5
+index 0000000..9cf71f1
 --- /dev/null
 +++ b/src/client_adaptor/CMakeLists.txt
 @@ -0,0 +1,17 @@
@@ -53,25 +53,25 @@ index 00000000000..17c30787fc5
 +
 +add_library(ceph_client_adaptor_plugin SHARED ${client_adaptor_srcs})
 +message(STATUS "In cliend adaptor third part directory --> " ${third_part_dir})
-+target_link_libraries(ceph_client_adaptor_plugin ccm_lib das)
++target_link_libraries(ceph_client_adaptor_plugin osdc ccm_lib das upf ftdsclient dptracepoint dif alarm)
 +
 +
 +set(client_adaptor_dir ${CEPH_INSTALL_PKGLIBDIR})
-+install(TARGETS ceph_client_adaptor_plugin   DESTINATION ${client_adaptor_dir})
++install(TARGETS ceph_client_adaptor_plugin DESTINATION ${client_adaptor_dir})
 +
 +message(STATUS "Global Cache client-adaptor cmake executing...")
 +
 diff --git a/src/client_adaptor/ClientAdaptorMgr.cc b/src/client_adaptor/ClientAdaptorMgr.cc
 new file mode 100644
-index 00000000..6535968e
+index 0000000..58d0d7c
 --- /dev/null
 +++ b/src/client_adaptor/ClientAdaptorMgr.cc
-@@ -0,0 +1,123 @@
+@@ -0,0 +1,196 @@
 +/* License:LGPL-2.1
-+ *
-+ * Copyright (c) 2021 Huawei Technologies Co., Ltf All rights reserved.
-+ *
-+ */
++*
++* Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
++*
++*/
 +
 +#include <iostream>
 +#include "ClientAdaptorMgr.h"
@@ -96,7 +96,7 @@ index 00000000..6535968e
 +    }
 +    std::vector<uint32_t> normal_pt;
 +    for (uint32_t i = 0; i < entryNum; i++) {
-+        if (entry[i].state == PTVIEW_PT_STATE_NORMAL) {
++        if (entry[i].state == CCM_PT_STATE_OK) {
 +            normal_pt.push_back(entry[i].ptId);
 +        }
 +    }
@@ -133,9 +133,12 @@ index 00000000..6535968e
 +}
 +
 +/*
-+ * Init manager .  failed to return -1
++ * Init manager ,  failed to return !0
 +*/
 +int32_t ClientAdaptorCcm::init_mgr(Objecter *obj){
++    using namespace std::chrono;
++    int32_t ret = 0;
++    seconds timeout {50 * 60};
 +    //Already init
 +    if (is_init_succeed()){
 +        if (!ccm_callback_register(obj)) {
@@ -143,7 +146,23 @@ index 00000000..6535968e
 +        }
 +        return RET_OK;
 +    }
-+    if (OpenAgentInit()){
++    steady_clock::time_point begin = steady_clock::now();
++    while (true) {
++        ret = OpenAgentInit(false);
++        if (ret == 0) {
++            break;
++        }
++
++        steady_clock::time_point end = steady_clock::now();
++        seconds time_span = duration_cast<seconds>(end - begin);
++        if (time_span > timeout) {
++            std::cout << __func__ << " Client Adaptor: CCM agent init failed because of timeout"
++                                  << ", timeout=" << timeout << std::endl;
++            break;
++        }
++        sleep(1);
++    }
++    if (ret){
 +        std::cout << __func__ << " Client Adaptor: CCM agent init failed" << std::endl;
 +	    return RET_CCM_AGENT_INIT_ERROR;
 +    }
@@ -151,7 +170,6 @@ index 00000000..6535968e
 +    if (!ccm_callback_register(obj)){
 +    	return RET_CCM_REGISTER_ERROR;
 +    }
-+
 +    return RET_OK;
 +}
 +
@@ -169,7 +187,28 @@ index 00000000..6535968e
 +}
 +
 +int32_t ClientAdaptorCcm::get_node_info(uint32_t node_id, NodeInfo* node_info){
-+    if (OpenAgentGetNodeInfo(node_id, node_info)){
++    using namespace std::chrono;
++    int32_t ret = 0;
++    seconds timeout {50 * 60};
++
++    steady_clock::time_point begin = steady_clock::now();
++    while (true) {
++        ret = OpenAgentGetNodeInfo(node_id, node_info);
++        if (ret == 0) {
++            break;
++        }
++
++        steady_clock::time_point end = steady_clock::now();
++        seconds time_span = duration_cast<seconds>(end - begin);
++
++        if (time_span > timeout) {
++            std::cout << __func__ << " Client Adaptor: get node info failed because of timeout"
++                                  << ", timeout=" << timeout << std::endl;
++            break;
++        }
++        sleep(1);
++    }
++    if (ret){
 +        std::cout << __func__ << " Client Adaptor: Get node infomation failed" << std::endl;
 +        return RET_CCM_NODE_INFO_ERROR;
 +    }
@@ -185,28 +224,63 @@ index 00000000..6535968e
 +        return false;
 +    }
 +
-+    if (pt_entry.state != PTVIEW_PT_STATE_NORMAL) {
++    if (pt_entry.state != CCM_PT_STATE_OK) {
 +        return false;
 +    }
 +    return ret;
 +}
++
++int32_t ClientAdaptorCcm::add_snap_to_gc(const int64_t pool_id,
++                                          const std::string &image_id,
++                                          const uint64_t snap_id) {
++    int32_t ret = OpenCreateSnapshot(pool_id, image_id.c_str(), snap_id);
++    if (ret < 0) {
++        std::cout << __func__ << " Client Adaptor: Add to gc failed, snap_id=" << snap_id
++                 << " ret="<< ret << std::endl;
++        return ret;
++    }
++    return 0;
++}
++
++int32_t ClientAdaptorCcm::remove_snap_from_gc(const int64_t pool_id,
++                                          const std::string &image_id,
++                                          const uint64_t snap_id) {
++    int32_t ret = OpenDeleteSnapshot(pool_id, image_id.c_str(), snap_id);
++    if (ret < 0) {
++        std::cout << __func__ << " Client Adaptor: Remove from gc failed, snap_id=" << snap_id
++                 << " ret="<< ret << std::endl;
++        return ret;
++    }
++    return 0;
++}
++
++int32_t ClientAdaptorCcm::remove_gc_image_resource(const int64_t pool_id, const std::string image_id) {
++    int32_t ret = 0;//OpenReleaseImageResource(pool_id, image_id.c_str());
++    if (ret < 0) {
++        std::cout << __func__ << " Client Adaptor: Remove image resource failed, image_id=" << image_id
++                 << " ret="<< ret << std::endl;
++        return ret;
++    }
++    return 0;
++}
+\ No newline at end of file
 diff --git a/src/client_adaptor/ClientAdaptorMgr.h b/src/client_adaptor/ClientAdaptorMgr.h
 new file mode 100644
-index 00000000..2475605f
+index 0000000..387856a
 --- /dev/null
 +++ b/src/client_adaptor/ClientAdaptorMgr.h
-@@ -0,0 +1,117 @@
+@@ -0,0 +1,146 @@
 +/* License:LGPL-2.1
-+ *
-+ * Copyright (c) 2021 Huawei Technologies Co., Ltf All rights reserved.
-+ *
-+ */
++*
++* Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
++*
++*/
 +
 +#ifndef CLIENT_ADAPTOR_MGR_H
 +#define CLIENT_ADAPTOR_MGR_H
 +
-+#include <set>
 +#include <string>
++#include <set>
 +#include <osdc/Objecter.h>
 +extern "C"
 +{
@@ -240,6 +314,12 @@ index 00000000..2475605f
 +
 +  virtual int32_t get_node_info(uint32_t node_id, NodeInfo* node_info) = 0;
 +
++  virtual int32_t add_snap_to_gc(const int64_t pool_id, const std::string &image_id, const uint64_t snap_id) = 0;
++
++  virtual int32_t remove_snap_from_gc(const int64_t pool_id, const std::string &image_id, const uint64_t snap_id) = 0;
++
++  virtual int32_t remove_gc_image_resource(const int64_t pool_id, const std::string image_id) = 0;
++
 +  virtual const std::string name(){
 +    return "ClientAdaptorMgr";
 +  }
@@ -266,11 +346,20 @@ index 00000000..2475605f
 +  int32_t get_pt_entry(uint32_t pt_index, PTViewPtEntry* entry);
 +
 +  int32_t get_node_info(uint32_t node_id, NodeInfo* node_info);
++
++  int32_t add_snap_to_gc(const int64_t pool_id, const std::string &image_id, const uint64_t snap_id);
++
++  int32_t remove_snap_from_gc(const int64_t pool_id, const std::string &image_id, const uint64_t snap_id);
++
++  int32_t remove_gc_image_resource(const int64_t pool_id, const std::string image_id);
++
 +  const std::string name() override {
 +    return "ClientAdaptorCcm";
 +  }
++
 +  bool get_pt_status(uint32_t pt_id);
 +  void ccm_deregister(Objecter *obj);
++
 +private:
 +  std::map<Objecter*, PTViewChangeOpHandle* > register_objs;
 +  bool ccm_callback_register(Objecter *obj);
@@ -291,7 +380,7 @@ index 00000000..2475605f
 +  }
 +  
 +  int32_t get_pt_entry(uint32_t pt_index, PTViewPtEntry* entry){
-+    entry->masterNodeId = pt_index % 3;
++    entry->masterNode = pt_index % 3;
 +    return 0;
 +  }
 +
@@ -301,6 +390,19 @@ index 00000000..2475605f
 +    node_info->portNum = 1;
 +    return 0;
 +  }
++
++  int32_t add_snap_to_gc(const int64_t pool_id, const std::string &image_id, const uint64_t snap_id) {
++    return 0;
++  }
++
++  int32_t remove_snap_from_gc(const int64_t pool_id, const std::string &image_id, const uint64_t snap_id)  {
++    return 0;
++  }
++
++  int32_t remove_gc_image_resource(const int64_t pool_id, const std::string image_id)  {
++    return 0;
++  }
++
 +  const std::string name() override {
 +    return "ClientAdaptorLocal";
 +  }
@@ -308,6 +410,7 @@ index 00000000..2475605f
 +    return true;
 +  }
 +  void ccm_deregister(Objecter *obj) {}
++
 +private:
 +};
 +
@@ -315,15 +418,15 @@ index 00000000..2475605f
 +#endif
 diff --git a/src/client_adaptor/ClientAdaptorMsg.cc b/src/client_adaptor/ClientAdaptorMsg.cc
 new file mode 100644
-index 00000000..7c7da3ba
+index 0000000..001397c
 --- /dev/null
 +++ b/src/client_adaptor/ClientAdaptorMsg.cc
-@@ -0,0 +1,291 @@
+@@ -0,0 +1,288 @@
 +/* License:LGPL-2.1
-+ *
-+ * Copyright (c) 2021 Huawei Technologies Co., Ltf All rights reserved.
-+ *
-+ */
++*
++* Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
++*
++*/
 +
 +#include <iostream>
 +#include <regex>
@@ -331,11 +434,11 @@ index 00000000..7c7da3ba
 +#include "ClientAdaptorMgr.h"
 +
 +namespace {
-+const int RBD_DATA_OBJECT_NAME_FILTER_LEN = 8;
-+const int RBD_DATA_OBJECT_NAME_LEN = 27;
++const int RBD_DATA_OBJECT_NAME_FILTER_LEN = 8;  // rbd_data(8 bits)
++const int RBD_DATA_OBJECT_NAME_LEN = 27;   // rbd_data(8 bits).image_id(n bits).object_index(16 bits)
 +const string RBD_DATA_OBJECT_NAME = "rbd_data";
-+const int RGW_BUCKET_ID_LEN = 36;
-+const int RGW_OBJECT_NAME_LEN = 38;
++const int RGW_BUCKET_ID_LEN = 36;    // bucket_id(36 bits)
++const int RGW_OBJECT_NAME_LEN = 38;      // bucket_id(36 bits)_Object_Name(n bits)
 +const uint64_t SEGMENT_SIZE = 4194304;
 +const uint64_t SEGMENT_MASK = 0x3FFFFF;
 +const int OBJECT_ID_LEN = 16;
@@ -381,22 +484,18 @@ index 00000000..7c7da3ba
 +    objecter->op_submit(objecter_op);
 +}
 +
++/**
++ * Maximum string length of the RBD block object name prefix (not including
++ * null termination).
++ */
 +bool ClientAdaptorMsg::filter_msg(Objecter::op_target_t *t){
 +
 +  string obj_name = t->base_oid.name;	
-+
 +  if (obj_name.size() < RBD_DATA_OBJECT_NAME_LEN) {
 +    return false;
 +  }
 +
 +  if (obj_name.compare(0, RBD_DATA_OBJECT_NAME_FILTER_LEN, RBD_DATA_OBJECT_NAME) == 0){
-+    return true;
-+  }
-+  if (obj_name.size() < RGW_OBJECT_NAME_LEN) {
-+    return false;
-+  }
-+
-+  if (obj_name.size() > (RGW_BUCKET_ID_LEN + 1) && obj_name.substr(RGW_BUCKET_ID_LEN, 1) == "."){
 +    return true;
 +  }
 +
@@ -415,8 +514,8 @@ index 00000000..7c7da3ba
 +  return false;
 +}
 +
-+int32_t ClientAdaptorMsg::get_node_id(string obj_name, int64_t pool_id, uint32_t& pt_id){
-+  if (obj_name.length() == 0 || pool_id < 0){
++int32_t ClientAdaptorMsg::get_node_id(string obj_name, uint64_t& pool_id, uint32_t& pt_id){
++  if (obj_name.length() == 0){
 +    std::cout << __func__ << " Client Adaptor: input parameter invalid!" << std::endl;
 +    return -RET_CCM_PARAM_ERROR;
 +  }
@@ -447,11 +546,12 @@ index 00000000..7c7da3ba
 +    std::cout << __func__ << " Client Adaptor: Get PT entry failed" << std::endl;
 +    return -RET_CCM_PT_ENTRY_ERROR;
 +  }
-+  uint32_t node_id = pt_entry.masterNodeId << NODE_ID_OFFSET_BIT;
++  uint32_t node_id = pt_entry.peerGroup[0].nodeID << NODE_ID_OFFSET_BIT;
 +  node_id += 0x1 << FLAG_OFFSET_BIT;
++  pool_id |= pt_entry.birthVersion << 32;
 +
-+  if (mgr_ref->get_node_info(pt_entry.masterNodeId, &info)){
-+    std::cout << __func__ << " Client Adaptor: Get node info failed" << std::endl;
++  if (mgr_ref->get_node_info(pt_entry.peerGroup[0].nodeID, &info)){
++    std::cout << __func__ << " Client Adaptor: Get node info failed. node id " << pt_entry.peerGroup[0].nodeID << std::endl;
 +    return -RET_CCM_NODE_INFO_ERROR;
 +  }
 +  if (info.portNum > PORT_SUPPORT_MAX || info.portNum == 0) {
@@ -480,14 +580,16 @@ index 00000000..7c7da3ba
 +  uint32_t port_index = node_index & PORT_INDEX_MASK;
 +  NodeInfo info = {0};
 +  if (mgr_ref->get_node_info(node_id, &info)){
-+    std::cout << __func__ << " Client Adaptor: Get node info failed" << std::endl;
++    std::cout << __func__ << " Client Adaptor: Get node info failed." << std::endl;
 +    return RET_CCM_NODE_INFO_ERROR;
 +  }
 +  uint32_t port = info.ports[port_index];
 +  if (port < GC_PORT_MIN || port > GC_PORT_MAX) {
 +      return RET_CCM_PORT_NUM_ERROR;
 +  }
++
 +  string server_ip = info.publicAddrStr;
++
 +  if (!valid_ip(server_ip)) {
 +      return RET_CCM_IP_ERROR;
 +  }
@@ -497,7 +599,6 @@ index 00000000..7c7da3ba
 +  addr_str += ":";
 +  addr_str += to_string(port);
 +  node_ip = addr_str;
-+
 +  return RET_OK;
 +}
 +
@@ -531,7 +632,8 @@ index 00000000..7c7da3ba
 +        snprintf(buff+params->imageIdLen, OBJECT_ID_LEN+1, "%016x", id);
 +        std::string oid_name(buff);
 +        uint32_t pt_id;
-+        int32_t node_id = msg_ref->get_node_id(oid_name, params->cephPoolId, pt_id);
++        uint64_t pool_id = params->cephPoolId;
++        int32_t node_id = msg_ref->get_node_id(oid_name, pool_id, pt_id);
 +        if (node_id < 0) {
 +            ceph_abort();
 +        }
@@ -608,19 +710,17 @@ index 00000000..7c7da3ba
 +    return 0;
 +}
 +
-+
-+
 diff --git a/src/client_adaptor/ClientAdaptorMsg.h b/src/client_adaptor/ClientAdaptorMsg.h
 new file mode 100644
-index 00000000..88e8b4e8
+index 0000000..585d06d
 --- /dev/null
 +++ b/src/client_adaptor/ClientAdaptorMsg.h
-@@ -0,0 +1,78 @@
+@@ -0,0 +1,77 @@
 +/* License:LGPL-2.1
-+ *
-+ * Copyright (c) 2021 Huawei Technologies Co., Ltf All rights reserved.
-+ *
-+ */
++*
++* Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
++*
++*/
 +
 +#ifndef CLIENT_ADAPTOR_MSG_H
 +#define CLIENT_ADAPTOR_MSG_H
@@ -638,43 +738,42 @@ index 00000000..88e8b4e8
 +  ClientAdaptorMsg(ClientAdaptorMgr* mgr); 
 +  ~ClientAdaptorMsg() {}; 
 +
-+void push_strategy(Objecter *objecter, uint64_t pool_id, int32_t node_id, std::string oid_name, bufferlist &indata);
++  void push_strategy(Objecter *objecter, uint64_t pool_id, int32_t node_id, std::string oid_name, bufferlist &indata);
 +
++  int32_t das_init(Objecter *obj);
 +
-+int32_t das_init(Objecter *obj);
-+
-+void das_remove(Objecter *obj) {
-+  das_objs.erase(obj);
-+  if (das_objs.empty() && initialized) {
-+    initialized = false;
-+    OpenRcacheExitDasModule(this);
++  void das_remove(Objecter *obj) {
++    das_objs.erase(obj);
++    if (das_objs.empty() && initialized) {
++      initialized = false;
++      OpenRcacheExitDasModule(this);
++    }
 +  }
-+}
 +
-+bool filter_msg(Objecter::op_target_t *t);
++  bool filter_msg(Objecter::op_target_t *t);
 +
-+bool filter_msg_by_op(Objecter::Op *op);
++  bool filter_msg_by_op(Objecter::Op *op);
 +
-+const string name() {return "ClientAdaptorMsg";}
++  const string name() {return "ClientAdaptorMsg";}
 +
-+bool is_node(uint32_t index);
++  bool is_node(uint32_t index);
 +
-+int32_t get_node_id(string obj_name, int64_t pool_id, uint32_t& pt_index);
++  int32_t get_node_id(string obj_name, uint64_t& pool_id, uint32_t& pt_index);
 +
-+int32_t get_node_ip(uint32_t node_index, string& node_ip);
++  int32_t get_node_ip(uint32_t node_index, string& node_ip);
 +
-+void set_mgr(ClientAdaptorMgr* mgr);
++  void set_mgr(ClientAdaptorMgr* mgr);
 +
-+ClientAdaptorMgr* get_mgr(void);
++  ClientAdaptorMgr* get_mgr(void);
 +
-+bool is_valid_object(Objecter *obj) {
-+  auto it = das_objs.find(obj);
-+  if (it != das_objs.end())
-+    return true;
-+  return false;
-+}
++  bool is_valid_object(Objecter *obj) {
++    auto it = das_objs.find(obj);
++    if (it != das_objs.end())
++      return true;
++    return false;
++  }
 +
-+int32_t das_update_info(Objecter *obj, Objecter::Op *op);
++  int32_t das_update_info(Objecter *obj, Objecter::Op *op);
 +
 +protected:
 +  ClientAdaptorMgr* mgr_ref;
@@ -696,15 +795,15 @@ index 00000000..88e8b4e8
 +#endif
 diff --git a/src/client_adaptor/ClientAdaptorPerf.cc b/src/client_adaptor/ClientAdaptorPerf.cc
 new file mode 100644
-index 00000000..58e012ad
+index 0000000..cea7835
 --- /dev/null
 +++ b/src/client_adaptor/ClientAdaptorPerf.cc
-@@ -0,0 +1,89 @@
+@@ -0,0 +1,85 @@
 +/* License:LGPL-2.1
-+ *
-+ * Copyright (c) 2021 Huawei Technologies Co., Ltf All rights reserved.
-+ *
-+ */
++*
++* Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
++*
++*/
 +
 +#include "ClientAdaptorPerf.h"
 +#include "ClientAdaptorPlugin.h"
@@ -767,7 +866,7 @@ index 00000000..58e012ad
 +	    if ((read_cnt + write_cnt) != 0 ) {
 +		    avg_flight = (float)total_in_flight / (float)(read_cnt + write_cnt);
 +	    }
-+	    outfile << "***************************************************************************" << std::endl;
++	    outfile << "*************************************************************************" << std::endl;
 +	    outfile << "PID: " << getpid() << "    TID: " << gettid() << std::endl;
 +	    outfile << "          total_count     avg_latency(us)" << std::endl;
 +	    outfile << "read " << setw(16) << read_cnt << "    " << setw(16) << read_lat << std::endl;
@@ -785,21 +884,17 @@ index 00000000..58e012ad
 +	outfile.open("/var/log/ceph/perf_tick.log", ios::out | ios::app);
 +	return;
 +}
-+
-+
-+
-+
 diff --git a/src/client_adaptor/ClientAdaptorPerf.h b/src/client_adaptor/ClientAdaptorPerf.h
 new file mode 100644
-index 00000000..7a5b55d9
+index 0000000..f7ee5be
 --- /dev/null
 +++ b/src/client_adaptor/ClientAdaptorPerf.h
-@@ -0,0 +1,56 @@
+@@ -0,0 +1,55 @@
 +/* License:LGPL-2.1
-+ *
-+ * Copyright (c) 2021 Huawei Technologies Co., Ltf All rights reserved.
-+ *
-+ */
++*
++* Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
++*
++*/
 +
 +#ifndef CLIENT_ADAPTOR_PERF_H
 +#define CLIENT_ADAPTOR_PERF_H
@@ -850,18 +945,17 @@ index 00000000..7a5b55d9
 +};
 +
 +#endif
-+
 diff --git a/src/client_adaptor/ClientAdaptorPlugin.cc b/src/client_adaptor/ClientAdaptorPlugin.cc
 new file mode 100644
-index 00000000..8fbfdf8d
+index 0000000..c44e348
 --- /dev/null
 +++ b/src/client_adaptor/ClientAdaptorPlugin.cc
 @@ -0,0 +1,45 @@
 +/* License:LGPL-2.1
-+ *
-+ * Copyright (c) 2021 Huawei Technologies Co., Ltf All rights reserved.
-+ *
-+ */
++*
++* Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
++*
++*/
 +
 +#include <iostream>
 +#include "ClientAdaptorPlugin.h"
@@ -904,15 +998,15 @@ index 00000000..8fbfdf8d
 +}
 diff --git a/src/client_adaptor/ClientAdaptorPlugin.h b/src/client_adaptor/ClientAdaptorPlugin.h
 new file mode 100644
-index 00000000..2337ea6a
+index 0000000..fa7d71d
 --- /dev/null
 +++ b/src/client_adaptor/ClientAdaptorPlugin.h
 @@ -0,0 +1,39 @@
 +/* License:LGPL-2.1
-+ *
-+ * Copyright (c) 2021 Huawei Technologies Co., Ltf All rights reserved.
-+ *
-+ */
++*
++* Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
++*
++*/
 +
 +#ifndef CLIENT_ADAPTOR_PLUGIN_H
 +#define CLIENT_ADAPTOR_PLUGIN_H
@@ -949,26 +1043,25 @@ index 00000000..2337ea6a
 +#endif
 diff --git a/src/client_adaptor/open_ccm.h b/src/client_adaptor/open_ccm.h
 new file mode 100644
-index 00000000..68d57b4e
+index 0000000..0b238b9
 --- /dev/null
 +++ b/src/client_adaptor/open_ccm.h
-@@ -0,0 +1,159 @@
-+/*
-+* Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
-+*
-+* Licensed under the Apache License, Version 2.0 (the "License");
-+* you may not use this file except in compliance with the License.
-+* You may obtain a copy of the License at
-+*
-+*	http://www.apache.org/licenses/LICENSE-2.0
-+* 
-+* Unless required by applicable law or agreed to in writing, software
-+* distributed under the License is distributed on an "AS IS" BASIS,
-+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-+* See the License for the specific language governing permissions and
-+* limitations under the License.
-+*/
+@@ -0,0 +1,429 @@
++/* 
++ * Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
 +
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++*/
 +#ifndef __CCM_INTERFACE_H__
 +#define __CCM_INTERFACE_H__
 +
@@ -980,12 +1073,53 @@ index 00000000..68d57b4e
 +extern "C" {
 +#endif
 +
++#define PT_VIEW_NODE_MAX_DOMAIN     32
++#define PT_VIEW_MAX_POOL            256
 +#define PT_VIEW_MAX_COPY_NUM        6
-+#define MAX_DISK_NUM_PER_NODE       16
-+#define IP_ADDR_LEN                 (16)
-+#define DISK_NAME_LEN               (64)
-+#define DISK_SN_LEN                 (64)
-+#define MAX_PORT_NUM                (8)
++#define PG_VIEW_MAX_COPY_NUM        6
++#define MAX_CCM_CTRL_NODE_NUM       128
++#define PG_VIEW_COPY_NUM_3          3
++#define PG_VIEW_COPY_NUM_2          2
++#define PG_VIEW_COPY_NUM_1          1
++#define VNODE_COUNT_PER_DISK        2
++
++#define MAX_PT_ENTRY          1024
++#define MIN_PT_ENTRY          3
++#define MAX_PG_ENTRY          1024
++#define MIN_PG_ENTRY          3
++#define MAX_SERVER_NUM        MAX_CCM_CTRL_NODE_NUM
++
++#define CCM_MAX_DISK_NUM      1024
++#define CCM_VNODE_NUM_PER_NODE   8
++#define MAX_DISK_NUM_PER_NODE   16
++#define IP_ADDR_LEN           (16)
++#define DISK_NAME_LEN         (64)
++#define DISK_SN_LEN           (64)
++
++#define MAX_POOL_NAME_LEN     (256)
++#define CCM_MAX_POOL_NUM      (4096)
++#define MAX_PORT_NUM          (8)
++
++#define ZK_IP_ADDR_LEN        (16)
++#define ZK_DISK_NAME_LEN      (64)
++#define ZK_DISK_SN_LEN        (64)
++
++
++typedef enum {
++    NODE_STATE_INVALID  = 0,
++    NODE_STATE_UP       = 1,
++    NODE_STATE_STARTING = 2,
++    NODE_STATE_RUNNING  = 3,
++    NODE_STATE_UNWORK   = 4,
++    NODE_STATE_DOWN     = 5,
++    NODE_STATE_BUTT
++} NodeState;
++
++typedef enum {
++    NODE_CLUSTER_STATE_OUT  = 0,
++    NODE_CLUSTER_STATE_IN   = 1,
++    NODE_CLUSTER_STATE_BUTT
++} NodeClusterState;
 +
 +typedef enum {
 +    VDISK_STATE_DOWN = 0,
@@ -994,8 +1128,38 @@ index 00000000..68d57b4e
 +} VdiskState;
 +
 +typedef struct {
++    uint32_t NodeId;
++    uint32_t ptNum;
++    uint32_t (*ptMap)[2];
++} NodePtInfo;
++
++typedef struct {
++    uint32_t ipv4Addr;
++    uint32_t port;
++} NetInfo;
++
++typedef enum {
++    CCM_NET_CONNECTED   = 1,
++    CCM_NET_CONNECTLOOS = 2,
++    CCM_NET_BUTT
++} NetState;
++
++typedef struct {
++    uint32_t srcNid;
++    uint32_t srcNodeVersion;
++    uint32_t dstNid;
++    uint32_t dstNodeVersion;
++} NetChangeInfo;
++
++typedef struct {
++    NetChangeInfo netInfo;
++    NetState state;
++} NetChangeEvent;
++
++typedef struct {
 +    uint32_t nodeId;
 +    uint32_t diskId;
++    uint32_t localDiskId;
 +    char diskName[DISK_NAME_LEN];
 +    char sn[DISK_SN_LEN];
 +    uint32_t capacity;
@@ -1005,7 +1169,7 @@ index 00000000..68d57b4e
 +
 +typedef struct {
 +    uint32_t nodeId;
-+    uint32_t state;
++    NodeState state;
 +    uint32_t ipv4addr;
 +    char ipv4AddrStr[IP_ADDR_LEN];
 +    char publicAddrStr[IP_ADDR_LEN];
@@ -1014,90 +1178,284 @@ index 00000000..68d57b4e
 +    uint32_t ports[MAX_PORT_NUM];
 +    uint32_t diskNum;
 +    VdiskInfo diskList[MAX_DISK_NUM_PER_NODE];
++    uint64_t version;
 +} NodeInfo;
 +
-+typedef enum __PTViewPtState {
-+    PTVIEW_PT_STATE_INIT = 0,
-+    PTVIEW_PT_STATE_NORMAL = 1,
-+    PTVIEW_PT_STATE_FAULT = 2,
-+    PTVIEW_PT_STATE_DEGRADE_LOSS1 = 3,
-+    PTVIEW_PT_STATE_DEGRADE_LOSS2 = 4,
-+    PTVIEW_PT_STATE_DEGRADE_LOSS3 = 5,
-+    PTVIEW_PT_STATE_DEGRADE_LOSS4 = 6,
-+    PTVIEW_PT_STATE_DEGRADE_LOSS5 = 7,
-+    PTVIEW_PT_STATE_DEGRADE_LOSS6 = 8,
-+    PTVIEW_PT_STATE_NO_USE = 9,
-+    PTVIEW_PT_STATE_FORCE_POWER_ON = 10,
-+    PTVIEW_PT_STATE_REPLAY = 11,
-+    PTVIEW_PT_STATE_RECOVERY = 12,
-+    PTVIEW_PT_STATE_BUTT
-+} PTViewPtState;
++/* ClusterInfo */
++typedef enum {
++    CLUSTER_STATE_POWER_ON  = 1,
++    CLUSTER_STATE_RUNNING   = 2,
++    CLUSTER_STATE_WARN      = 3,
++    CLUSTER_STATE_ERROR     = 4,
++    CLUSTER_STATE_OK        = 5,
++    CLUSTER_STATE_UNKNOWN   = 6
++} ClusterState;
 +
-+typedef enum __PTViewPtNodeState {
-+    PTVIEW_PT_NODE_STATE_UP = 1,
-+    PTVIEW_PT_NODE_STATE_DOWN = 2,
-+    PTVIEW_PT_NODE_STATE_BUTT
-+} PTViewPtNodeState;
++typedef struct {
++    uint32_t clusterId;
++    ClusterState clusterState;
++    uint32_t nodeNum;
++    NodeInfo nodeList[MAX_SERVER_NUM];
++    uint32_t diskNum;
++    VdiskInfo vdiskList[CCM_MAX_DISK_NUM];
++} ClusterInfo;
 +
-+typedef enum __PTViewPtDiskState {
-+    PTVIEW_PT_DISK_STATE_IN = 1,
-+    PTVIEW_PT_DISK_STATE_OUT = 2,
-+    PTVIEW_PT_DISK_STATE_BUTT
-+} PTViewPtDiskState;
++typedef struct __NodeEventHandle {
++    int32_t (*nodeEventHandle)(void *nodeList, int32_t nodeNum);
++} NodeEventHandle;
 +
-+typedef enum __PTViewPtCopyState {
-+    PTVIEW_PT_COPY_STATE_RUNNING = 1,
-+    PTVIEW_PT_COPY_STATE_SILENCE = 2,
-+    PTVIEW_PT_COPY_STATE_EMPTY = 3,
-+    PTVIEW_PT_COPY_STATE_RECOVERY = 4,
-+    PTVIEW_PT_COPY_STATE_REPLAYED = 5,
-+    PTVIEW_PT_COPY_STATE_DIRTY = 6,
-+    PTVIEW_PT_COPY_STATE_CLEAN = 7,
-+    PTVIEW_PT_COPY_STATE_BUTT
-+} PTViewPtCopyState;
++/* PGInfo & PGView */
++typedef enum __PGState {
++    CCM_PG_STATE_INIT   = 0,
++    CCM_PG_STATE_NORMAL = 1,
++    CCM_PG_STATE_DOWN   = 2,
++    CCM_PG_STATE_DEGRADE_LOSS1 = 3,
++    CCM_PG_STATE_DEGRADE_LOSS2 = 4,
++    CCM_PG_STATE_DEGRADE_LOSS3 = 5,
++    CCM_PG_STATE_DEGRADE_LOSS4 = 6,
++    CCM_PG_STATE_DEGRADE_LOSS5 = 7,
++    CCM_PG_STATE_DEGRADE_LOSS6 = 8,
++    CCM_PG_STATE_RECOVERY   = 9,
++    CCM_PG_STATE_FAULT      = 10,
++    CCM_PG_STATE_BUTT
++} PGState;
++
++/* node state of PT replicas */
++typedef enum __PgNodeState {
++    CCM_PG_NODE_STATE_UP = 1,
++    CCM_PG_NODE_STATE_DOWN = 2,
++    CCM_PG_NODE_STATE_OUT = 3,
++    CCM_PG_NODE_STATE_BUTT
++} PgNodeState;
++
++/* disk state of PT replicas */
++typedef enum __PgDiskState {
++    CCM_PG_DISK_STATE_IN = 1,
++    CCM_PG_DISK_STATE_OUT = 2,
++    CCM_PG_DISK_STATE_BUTT
++} PgDiskState;
++
++
++typedef enum __PgCopyState {
++    CCM_PG_COPY_STATE_RUNNING = 1,
++    CCM_PG_COPY_STATE_DOWN = 2,
++    CCM_PG_COPY_STATE_OUT = 3,
++    CCM_PG_COPY_STATE_RECOVERY = 4,
++    CCM_PG_COPY_STATE_BUTT
++} PgCopyState;
++
++typedef enum {
++    PG_REP_SINGLE = 1,
++    PG_REP_DOUBLE = 2,
++    PG_REP_TRIPLE = 3,
++    PG_REP_SIXPLE = 6,
++    PG_REP_STRATEGY_BUTTON
++} PGRepStrategy;
 +
 +typedef struct {
 +    uint32_t nodeId;
 +    uint32_t diskId;
-+    PTViewPtCopyState copyState;
-+    PTViewPtNodeState nodeState;
-+    PTViewPtDiskState diskState;
-+} PTViewPtCopy;
++    PgCopyState state;
++    PgNodeState nodeState;
++    PgDiskState diskState;
++} PgEntryCopy;
 +
 +typedef struct {
-+    uint32_t ptId;
++    uint32_t pgId;
 +    uint64_t globalVersion;
 +    uint64_t birthVersion;
 +    uint32_t currCopyNum;
 +    uint32_t masterNodeId;
-+    uint32_t indexInNode;
-+    PTViewPtState state;
-+    uint32_t copySiteNode[PT_VIEW_MAX_COPY_NUM];
-+    uint32_t copySiteDomain[PT_VIEW_MAX_COPY_NUM];
-+    PTViewPtCopyState copyStates[PT_VIEW_MAX_COPY_NUM];
-+    PTViewPtNodeState copySiteDomainStates[PT_VIEW_MAX_COPY_NUM];
-+    PTViewPtCopy copyList[PT_VIEW_MAX_COPY_NUM];
-+} PTViewPtEntry;
++    uint32_t masterDiskId;
++    uint32_t activeSize;
++    uint32_t vnodeId;
++    PGState state;
++    PgEntryCopy copyList[PG_VIEW_MAX_COPY_NUM];
++} PgEntry;
 +
++typedef PgEntry PgInfo;
++typedef struct __PgView PgView;
++
++struct __PgView {
++    uint32_t globalVersion;
++    uint32_t pgNum;
++    uint32_t copyNum;
++    uint8_t  reserve[8];
++    PgEntry pgInfo[0];
++};
++
++/* PtView & PtInfo*/
++typedef enum {
++    CCM_PT_STATE_INIT=0,
++    CCM_PT_STATE_OK,
++    CCM_PT_STATE_TRIM,
++    CCM_PT_STATE_REPLAY,
++    CCM_PT_STATE_FAULT,
++} PtState;
++
++typedef enum {
++    CCM_PT_SPLIT_RUNNING=0,
++    CCM_PT_SPLIT_COMPLETED,
++    CCM_PT_SPLIT_STOP,
++    CCM_PT_SPLIT_NONE,
++} SplitState;
++
++typedef struct {
++    uint32_t nodeID;
++    uint32_t vdiskID;
++    uint32_t vnode;
++} PtPeerInfo;
++
++typedef struct {
++    uint32_t nodeId;
++    uint32_t vnodeId;
++} PtSrcNodeInfo;
++
++typedef struct {
++    bool ptChange;
++    uint32_t birthVersion;
++    uint32_t ptId;
++    uint32_t indexInNode;
++    uint32_t masterNode;
++    PtState state;
++    SplitState splitState;
++    bool isRecoverd;
++    PtPeerInfo peerGroup[2];
++    PtPeerInfo targetPeerGroup[2];
++    PtSrcNodeInfo srcNodeInfo;
++} PtInfo;
++
++typedef struct _PtView {
++    uint32_t globalVersion;
++    uint32_t ptNum;
++    uint8_t reserve[8];
++    PtInfo ptInfo[0];
++} PtView;
++
++typedef PtInfo PTViewPtEntry;
++
++typedef struct {
++    void (*handle)(void *arg);
++    void *arg;
++} DeleteOpHandler;
++
++/* PGView callback */
++typedef struct {
++    void *ctx;
++    int32_t (*notifyPgChange)(PgEntry *entry, uint32_t entryNum, void *ctx);
++} PGViewChangeOpHandle;
++
++/* NodeView callback */
++typedef struct {
++    void *ctx;
++    int32_t (*notifyNodeChange)(NodeInfo *nodeList, uint32_t nodeNum, void *ctx);
++} NodeViewChangeOpHandle;
++
++/* PTView callback */
 +typedef struct {
 +    void *ctx;
 +    int32_t (*notifyPtChange)(PTViewPtEntry *entry, uint32_t entryNum, void *ctx);
 +} PTViewChangeOpHandle;
 +
++/* PG recovery callback */
++typedef struct {
++    void *ctx;
++    int32_t (*recovery)(PgView *pgView, void *ctx);
++} PGRecoverHandle;
++
++/* PT Split callback */
++typedef struct {
++    void *ctx;
++    int32_t (*split)(PtView *ptView, void *ctx);
++} PTSplitHandle;
++
++/* PT Trim callback */
++typedef struct {
++    void *ctx;
++    int32_t (*trim)(PTViewPtEntry *entry, uint32_t entryNum, void *ctx);
++} PTTrimHandle;
++
++/* PT Recovery callback */
++typedef struct {
++    void *ctx;
++    int32_t (*replay)(PTViewPtEntry *entry, uint32_t entryNum, void *ctx);
++} PTReplayHandle;
++
++typedef struct {
++    void *ctx;
++    int32_t (*powerOn)(void *ctx);
++} PowerOnHandle;
++
 +typedef enum {
 +    CCM_MODULE_INFRAS = 0,
-+    CCM_MODULE_INDEX = 1,
-+    CCM_MODULE_RCACHE = 2,
-+    CCM_MODULE_WCACHE = 3,
-+    CCM_MODULE_CLIENT = 4,
-+    CCM_MODULE_CEPH = 5,
-+    CCM_MODULE_PLOG = 6,
-+    CCM_MODULE_STREAM = 7,
-+    CCM_MODULE_POOL = 8,
++    CCM_MODULE_PLOG,
++    CCM_MODULE_INDEX,
++    CCM_MODULE_CACHE,
++    CCM_MODULE_CLIENT,
++    CCM_MODULE_CEPH,
 +    CCM_MODULE_BUTT,
 +} ModuleType;
 +
-+int32_t OpenAgentInit(void);
++typedef enum {
++    PT = 0,
++    PG = 1,
++} EntryType;
++
++typedef enum {
++    RECOVERY_OK = 1,
++    RECOVERY_FAILD,
++
++    SPLIT_OK,
++    SPLIT_FAILD,
++    SPLIT_AGAIN,
++
++    TRIM_OK,
++    TRIM_FAILD,
++
++    REPLAY_OK,
++    REPLAY_FAILD,
++} PeerEventType;
++
++typedef struct {
++    uint32_t id;
++    uint32_t version;
++    uint32_t nodeId;
++    PeerEventType type;
++} PeerEntryInfo;
++
++typedef enum {
++    CCM_MODULE_STATE_INITING    = 0,
++    CCM_MODULE_STATE_REPLAYING  = 1,
++    CCM_MODULE_STATE_REPLAYED   = 2,
++    CCM_MODULE_STATE_RECOVERING = 3,
++    CCM_MODULE_STATE_DOWN       = 4,
++    CCM_MODULE_STATE_BUTT,
++} ModuleState;
++
++typedef enum {
++    CACHENODE = 0,
++    CLIENTNODE = 1,
++} NodeType;
++
++typedef enum {
++    IOTYPE_READ = 0,
++    IOTYPE_WRITE = 1,
++} IOType_E;
++
++typedef struct {
++    uint64_t ioCount;
++    uint64_t readCount;
++    uint64_t readSize;
++    uint64_t writeCount;
++    uint64_t writeSize;
++} PtIOStat;
++
++typedef struct {
++    uint64_t ptNum;
++    PtIOStat table[MAX_PT_ENTRY];
++} PtViewIOStat;
++
++int32_t OpenAgentInit(bool isServer);
 +
 +int32_t OpenGetPtEntry(uint32_t ptId, PTViewPtEntry *entry);
 +
@@ -1107,33 +1465,39 @@ index 00000000..68d57b4e
 +
 +int32_t OpenRegisterViewChangeNotifyChain(PTViewChangeOpHandle *handle, uint8_t type);
 +
++int32_t OpenCreateSnapshot(const int64_t poolId, const char *imageId, const uint64_t snapId);
++
++int32_t OpenDeleteSnapshot(const int64_t poolId, const char *imageId, const uint64_t snapId);
++
++int32_t OpenReleaseImageResource(const int64_t poolId, const char *imageId);
++
 +#ifdef __cplusplus
 +}
 +#endif
 +
 +#endif // __CCM_INTERFACE_H__
+\ No newline at end of file
 diff --git a/src/client_adaptor/open_das.h b/src/client_adaptor/open_das.h
 new file mode 100644
-index 00000000..16002954
+index 0000000..ccb4548
 --- /dev/null
 +++ b/src/client_adaptor/open_das.h
-@@ -0,0 +1,68 @@
-+/*
-+* Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
-+*
-+* Licensed under the Apache License, Version 2.0 (the "License");
-+* you may not use this file except in compliance with the License.
-+* You may obtain a copy of the License at
-+*
-+*	http://www.apache.org/licenses/LICENSE-2.0
-+* 
-+* Unless required by applicable law or agreed to in writing, software
-+* distributed under the License is distributed on an "AS IS" BASIS,
-+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-+* See the License for the specific language governing permissions and
-+* limitations under the License.
-+*/
+@@ -0,0 +1,66 @@
++/* 
++ * Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
 +
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++*/
 +#ifndef OPEN_DAS_H
 +#define OPEN_DAS_H
 +
@@ -1179,34 +1543,27 @@ index 00000000..16002954
 +    DasOPS *ops;
 +} DasModuleParam;
 +
-+int32_t OpenRcacheCeateDasModule(void* handle, DasModuleParam *createInstanceParam);
++int32_t OpenRcacheCeateDasModule(void *handle, DasModuleParam *createInstanceParam);
 +
 +int32_t OpenRcachePutDasInfo(DasKvParam *params[], uint32_t keyNum);
 +
 +void OpenRcacheExitDasModule(void *handle);
-+
 +#endif // OPEN_DAS_H
+\ No newline at end of file
 diff --git a/src/common/options.cc b/src/common/options.cc
-index 8135ea8f..fb9215e3 100644
+index 8135ea8..9d3bb78 100644
 --- a/src/common/options.cc
 +++ b/src/common/options.cc
-@@ -1014,9 +1014,15 @@ std::vector<Option> get_global_options() {
-     .set_default(false)
+@@ -1015,7 +1015,7 @@ std::vector<Option> get_global_options() {
      .set_description("Induce a crash/exit on various bugs (for testing purposes)"),
  
-+#ifdef WITH_GLOBAL_CACHE
-+    Option("ms_dispatch_throttle_bytes", Option::TYPE_SIZE, Option::LEVEL_ADVANCED)
-+    .set_default(0)
-+    .set_description("Limit messages that are read off the network but still being processed"),
-+#else
      Option("ms_dispatch_throttle_bytes", Option::TYPE_SIZE, Option::LEVEL_ADVANCED)
-     .set_default(100_M)
+-    .set_default(100_M)
++    .set_default(2048_M)
      .set_description("Limit messages that are read off the network but still being processed"),
-+#endif
  
      Option("ms_bind_ipv4", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
-     .set_default(true)
-@@ -2308,6 +2314,15 @@ std::vector<Option> get_global_options() {
+@@ -2308,6 +2308,15 @@ std::vector<Option> get_global_options() {
      .set_default(10.0)
      .set_description("Seconds before in-flight op is considered 'laggy' and we query mon for the latest OSDMap"),
  
@@ -1222,7 +1579,7 @@ index 8135ea8f..fb9215e3 100644
      Option("objecter_inflight_op_bytes", Option::TYPE_SIZE, Option::LEVEL_ADVANCED)
      .set_default(100_M)
      .set_description("Max in-flight data in bytes (both directions)"),
-@@ -2315,6 +2330,7 @@ std::vector<Option> get_global_options() {
+@@ -2315,6 +2324,7 @@ std::vector<Option> get_global_options() {
      Option("objecter_inflight_ops", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
      .set_default(1024)
      .set_description("Max in-flight operations"),
@@ -1230,7 +1587,7 @@ index 8135ea8f..fb9215e3 100644
  
      Option("objecter_completion_locks_per_session", Option::TYPE_UINT, Option::LEVEL_DEV)
      .set_default(32)
-@@ -5587,6 +5603,14 @@ std::vector<Option> get_global_options() {
+@@ -5587,6 +5597,14 @@ std::vector<Option> get_global_options() {
      Option("debug_heartbeat_testing_span", Option::TYPE_INT, Option::LEVEL_DEV)
      .set_default(0)
      .set_description("Override 60 second periods for testing only"),
@@ -1245,7 +1602,7 @@ index 8135ea8f..fb9215e3 100644
    });
  }
  
-@@ -7222,11 +7246,15 @@ static std::vector<Option> get_rbd_options() {
+@@ -7222,11 +7240,15 @@ static std::vector<Option> get_rbd_options() {
      Option("rbd_non_blocking_aio", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
      .set_default(true)
      .set_description("process AIO ops from a dispatch thread to prevent blocking"),
@@ -1263,7 +1620,7 @@ index 8135ea8f..fb9215e3 100644
      Option("rbd_cache_writethrough_until_flush", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
      .set_default(true)
      .set_description("whether to make writeback caching writethrough until "
-@@ -7537,6 +7565,11 @@ static std::vector<Option> get_rbd_options() {
+@@ -7537,6 +7559,15 @@ static std::vector<Option> get_rbd_options() {
      .set_default(60)
      .set_min(0)
      .set_description("RBD Image access timestamp refresh interval. Set to 0 to disable access timestamp update."),
@@ -1271,12 +1628,16 @@ index 8135ea8f..fb9215e3 100644
 +    Option("global_cache", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
 +    .set_default(true)
 +    .set_description("whether to enable global cache"),
++
++    Option("gc_perf", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
++    .set_default(true)
++    .set_description("whether to enable global cache perf"),
 +#endif
    });
  }
  
 diff --git a/src/include/config-h.in.cmake b/src/include/config-h.in.cmake
-index d83a59b2..12dfdf5e 100644
+index d83a59b..12dfdf5 100644
 --- a/src/include/config-h.in.cmake
 +++ b/src/include/config-h.in.cmake
 @@ -187,6 +187,9 @@
@@ -1290,7 +1651,7 @@ index d83a59b2..12dfdf5e 100644
  #cmakedefine HAVE_BABELTRACE_BABELTRACE_H 1
  
 diff --git a/src/librbd/ImageCtx.cc b/src/librbd/ImageCtx.cc
-index 8375d1a6390..68983334297 100644
+index 8375d1a..f79941e 100644
 --- a/src/librbd/ImageCtx.cc
 +++ b/src/librbd/ImageCtx.cc
 @@ -270,6 +270,18 @@ public:
@@ -1312,8 +1673,34 @@ index 8375d1a6390..68983334297 100644
      plb.add_u64_counter(l_librbd_discard, "discard", "Discards");
      plb.add_u64_counter(l_librbd_discard_bytes, "discard_bytes", "Discarded data", NULL, 0, unit_t(UNIT_BYTES));
      plb.add_time_avg(l_librbd_discard_latency, "discard_latency", "Discard latency");
+@@ -778,9 +790,7 @@ public:
+ 
+     bool skip_partial_discard = true;
+     ASSIGN_OPTION(non_blocking_aio, bool);
+-    ASSIGN_OPTION(cache, bool);
+     ASSIGN_OPTION(cache_writethrough_until_flush, bool);
+-    ASSIGN_OPTION(cache_max_dirty, Option::size_t);
+     ASSIGN_OPTION(sparse_read_threshold_bytes, Option::size_t);
+     ASSIGN_OPTION(readahead_max_bytes, Option::size_t);
+     ASSIGN_OPTION(readahead_disable_after_bytes, Option::size_t);
+diff --git a/src/librbd/ImageCtx.h b/src/librbd/ImageCtx.h
+index df5271e..2e8d7f0 100644
+--- a/src/librbd/ImageCtx.h
++++ b/src/librbd/ImageCtx.h
+@@ -174,9 +174,9 @@ namespace librbd {
+ 
+     /// Cached latency-sensitive configuration settings
+     bool non_blocking_aio;
+-    bool cache;
++    bool cache = false; // bypass rbd cache feature
+     bool cache_writethrough_until_flush;
+-    uint64_t cache_max_dirty;
++    uint64_t cache_max_dirty = 0;
+     uint64_t sparse_read_threshold_bytes;
+     uint64_t readahead_max_bytes;
+     uint64_t readahead_disable_after_bytes;
 diff --git a/src/librbd/Types.h b/src/librbd/Types.h
-index 3f1104478eb..e33023fb79c 100644
+index 3f11044..e33023f 100644
 --- a/src/librbd/Types.h
 +++ b/src/librbd/Types.h
 @@ -22,6 +22,14 @@ enum {
@@ -1331,8 +1718,120 @@ index 3f1104478eb..e33023fb79c 100644
    l_librbd_discard,
    l_librbd_discard_bytes,
    l_librbd_discard_latency,
+diff --git a/src/librbd/image/RemoveRequest.cc b/src/librbd/image/RemoveRequest.cc
+index 8e029f8..85b06e2 100644
+--- a/src/librbd/image/RemoveRequest.cc
++++ b/src/librbd/image/RemoveRequest.cc
+@@ -14,6 +14,10 @@
+ #include "librbd/journal/RemoveRequest.h"
+ #include "librbd/mirror/DisableRequest.h"
+ #include "librbd/operation/TrimRequest.h"
++#ifdef WITH_GLOBAL_CACHE
++#include "client_adaptor/ClientAdaptorPlugin.h"
++#include "client_adaptor/ClientAdaptorMgr.h"
++#endif
+ 
+ #define dout_subsys ceph_subsys_rbd
+ #undef dout_prefix
+@@ -58,6 +62,15 @@ template<typename I>
+ void RemoveRequest<I>::send() {
+   ldout(m_cct, 20) << dendl;
+ 
++#ifdef WITH_GLOBAL_CACHE
++  PluginRegistry *reg = m_cct->get_plugin_registry();
++  auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
++  if (plugin == NULL) {
++    ldout(m_cct, 5) << "global_cache plugin not loaded" << dendl;
++    finish(-ELIBACC);
++    return;
++  }
++#endif
+   open_image();
+ }
+ 
+@@ -393,6 +406,9 @@ void RemoveRequest<I>::handle_mirror_image_remove(int r) {
+   if (m_from_trash_remove) {
+     // both the id object and the directory entry have been removed in
+     // a previous call to trash_move.
++#ifdef WITH_GLOBAL_CACHE
++    remove_from_gc();
++#endif
+     finish(0);
+     return;
+   }
+@@ -433,7 +449,9 @@ void RemoveRequest<I>::handle_remove_v1_image(int r) {
+       lderr(m_cct) << "error removing image from v1 directory: "
+                    << cpp_strerror(r) << dendl;
+     }
+-
++#ifdef WITH_GLOBAL_CACHE
++    remove_from_gc();
++#endif
+     m_on_finish->complete(r);
+     delete this;
+     return;
+@@ -587,10 +605,32 @@ void RemoveRequest<I>::handle_dir_remove_image(int r) {
+     lderr(m_cct) << "error removing image from v2 directory: "
+                  << cpp_strerror(r) << dendl;
+   }
+-
++#ifdef WITH_GLOBAL_CACHE
++  remove_from_gc();
++#endif
+   finish(r);
+ }
+ 
++#ifdef WITH_GLOBAL_CACHE
++template<typename I>
++void RemoveRequest<I>::remove_from_gc() {
++    int64_t pool_id = m_ioctx.get_id();
++    ldout(m_cct, 20) << "pool_id=" << pool_id
++                    << " image_id=" << m_image_id
++                     << " image_name=" << m_image_name
++                     << dendl;
++    PluginRegistry *reg = m_cct->get_plugin_registry();
++    auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
++    ceph_assert(plugin);
++    int64_t ret = plugin->mgr_ref->remove_gc_image_resource(pool_id, m_image_id);
++    if (ret == 0) {
++        ldout(m_cct, 20) << "remove image from gc successfully, image_id=" << m_image_id << dendl;
++    } else {
++        ldout(m_cct, 5) <<"remove image from gc failed, image_id=" << m_image_id << " ret=" << ret << dendl;
++    }
++}
++#endif
++
+ template<typename I>
+ void RemoveRequest<I>::finish(int r) {
+   ldout(m_cct, 20) << "r=" << r << dendl;
+diff --git a/src/librbd/image/RemoveRequest.h b/src/librbd/image/RemoveRequest.h
+index 98d5976..b92af2d 100644
+--- a/src/librbd/image/RemoveRequest.h
++++ b/src/librbd/image/RemoveRequest.h
+@@ -96,6 +96,10 @@ private:
+    * |               |                /  |
+    * |               \-------<-------/   |
+    * |                                   v
++   * |                            REMOVE GC SNAP INFO
++   * |                                   |
++   * |                                   |
++   * |                                   v
+    * \------------------>------------<finish>
+    *
+    * @endverbatim
+@@ -187,6 +191,10 @@ private:
+   void dir_remove_image();
+   void handle_dir_remove_image(int r);
+ 
++#ifdef WITH_GLOBAL_CACHE
++  void remove_from_gc();
++#endif
++
+   void finish(int r);
+ };
+ 
 diff --git a/src/librbd/io/ImageDispatchSpec.h b/src/librbd/io/ImageDispatchSpec.h
-index 93c53a0fe8b..7551fb0c06e 100644
+index 93c53a0..7551fb0 100644
 --- a/src/librbd/io/ImageDispatchSpec.h
 +++ b/src/librbd/io/ImageDispatchSpec.h
 @@ -121,7 +121,11 @@ public:
@@ -1349,7 +1848,7 @@ index 93c53a0fe8b..7551fb0c06e 100644
    void fail(int r);
  
 diff --git a/src/librbd/io/ImageRequestWQ.cc b/src/librbd/io/ImageRequestWQ.cc
-index 34f2c2cf2ba..cae0341ac6d 100644
+index 34f2c2c..cae0341 100644
 --- a/src/librbd/io/ImageRequestWQ.cc
 +++ b/src/librbd/io/ImageRequestWQ.cc
 @@ -286,7 +286,13 @@ void ImageRequestWQ<I>::aio_read(AioCompletion *c, uint64_t off, uint64_t len,
@@ -1409,8 +1908,332 @@ index 34f2c2cf2ba..cae0341ac6d 100644
  
    ThreadPool::PointerWQ<ImageDispatchSpec<I> >::queue(req);
  }
+diff --git a/src/librbd/operation/SnapshotCreateRequest.cc b/src/librbd/operation/SnapshotCreateRequest.cc
+index 6629360..ba441b7 100644
+--- a/src/librbd/operation/SnapshotCreateRequest.cc
++++ b/src/librbd/operation/SnapshotCreateRequest.cc
+@@ -11,6 +11,11 @@
+ #include "librbd/Utils.h"
+ #include "librbd/io/ImageRequestWQ.h"
+ 
++#ifdef WITH_GLOBAL_CACHE
++#include "client_adaptor/ClientAdaptorPlugin.h"
++#include "client_adaptor/ClientAdaptorMgr.h"
++#endif
++
+ #define dout_subsys ceph_subsys_rbd
+ #undef dout_prefix
+ #define dout_prefix *_dout << "librbd::SnapshotCreateRequest: "
+@@ -45,6 +50,16 @@ void SnapshotCreateRequest<I>::send_op() {
+     return;
+   }
+ 
++#ifdef WITH_GLOBAL_CACHE
++  PluginRegistry *reg = cct->get_plugin_registry();
++  auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
++  if (plugin == NULL) {
++      lderr(cct) << "client adaptor plugin not found" << dendl;
++      this->async_complete(-ELIBACC);
++      return;
++  }
++#endif
++
+   send_suspend_requests();
+ }
+ 
+@@ -210,9 +225,55 @@ Context *SnapshotCreateRequest<I>::handle_create_snap(int *result) {
+     return nullptr;
+   }
+ 
++#ifdef WITH_GLOBAL_CACHE
++  return send_add_snap_to_gc();
++#else
+   return send_create_object_map();
++#endif
+ }
+ 
++#ifdef WITH_GLOBAL_CACHE
++template <typename I>
++Context *SnapshotCreateRequest<I>::send_add_snap_to_gc() {
++    I &image_ctx = this->m_image_ctx;
++    CephContext *cct = image_ctx.cct;
++    int64_t pool_id = image_ctx.md_ctx.get_id();
++    std::string pool_name;
++    ldout(cct, 5) << this << " Client Adaptor: " << __func__
++                                                   << " pool_id: " << pool_id
++                                                   << " image_id: " << image_ctx.id
++                                                   << " snap_id: " << m_snap_id
++                                                   << dendl;
++
++    librados::Rados rados(image_ctx.md_ctx);
++    int ret = rados.pool_reverse_lookup(pool_id, &pool_name);
++    ceph_assert(ret == 0 && !pool_name.empty());
++
++    ldout(cct, 5) << this << " Client Adaptor: " << __func__
++                                                   << " pool_name: " << pool_name
++                                                   << " image_name: " << image_ctx.name
++                                                   << " snap_name: " << m_snap_name
++                                                   << dendl;
++    
++    PluginRegistry *reg = cct->get_plugin_registry();
++    auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
++    int mgr_ret = -ELIBACC;
++
++    if (plugin && plugin->mgr_ref) {
++        mgr_ret = plugin->mgr_ref->add_snap_to_gc(pool_id, image_ctx.id, m_snap_id);
++    }
++
++    if (mgr_ret < 0) {
++        lderr(cct) << __func__ << " Client Adaptor: " << "gc create snapshot failed" << dendl;
++        save_result(&mgr_ret);
++        send_release_snap();
++        return nullptr;
++    }
++    ldout(cct, 20) << __func__ << " Client Adaptor: " << "gc create snapshot success" << dendl;
++    return send_create_object_map();
++}
++#endif
++
+ template <typename I>
+ Context *SnapshotCreateRequest<I>::send_create_object_map() {
+   I &image_ctx = this->m_image_ctx;
+@@ -257,6 +318,43 @@ Context *SnapshotCreateRequest<I>::handle_create_object_map(int *result) {
+   return this->create_context_finisher(0);
+ }
+ 
++#ifdef WITH_GLOBAL_CACHE
++template <typename I>
++void SnapshotCreateRequest<I>::send_release_snap() {
++    I &image_ctx = this->m_image_ctx;
++    CephContext *cct = image_ctx.cct;
++    ldout(cct, 5) << this << " " << __func__ << dendl;
++
++    librados::ObjectWriteOperation op;
++    if (image_ctx.old_format) {
++        cls_client::old_snapshot_remove(&op, m_snap_name);
++    } else {
++        cls_client::snapshot_remove(&op, m_snap_id);
++    }
++
++    librados::AioCompletion *rados_completion = create_rados_callback<
++        SnapshotCreateRequest<I>,
++        &SnapshotCreateRequest<I>::handle_release_snap>(this);
++    int r = image_ctx.md_ctx.aio_operate(image_ctx.header_oid,
++                                        rados_completion, &op);
++    ceph_assert(r == 0);
++    rados_completion->release();
++}
++
++template <typename I>
++Context *SnapshotCreateRequest<I>::handle_release_snap(int *result) {
++    I &image_ctx = this->m_image_ctx;
++    CephContext *cct = image_ctx.cct;
++    ldout(cct, 5) << this << " " << __func__ << ": r=" << *result << dendl;
++
++    ceph_assert(m_ret_val < 0);
++    *result = m_ret_val;
++
++    send_release_snap_id();
++    return nullptr;
++}
++#endif
++
+ template <typename I>
+ void SnapshotCreateRequest<I>::send_release_snap_id() {
+   I &image_ctx = this->m_image_ctx;
+diff --git a/src/librbd/operation/SnapshotCreateRequest.h b/src/librbd/operation/SnapshotCreateRequest.h
+index 406d2f0..5d1dfdd 100644
+--- a/src/librbd/operation/SnapshotCreateRequest.h
++++ b/src/librbd/operation/SnapshotCreateRequest.h
+@@ -31,26 +31,32 @@ public:
+    *           STATE_SUSPEND_REQUESTS
+    *               |
+    *               v
+-   *           STATE_SUSPEND_AIO * * * * * * * * * * * * *
+-   *               |                                     *
+-   *               v                                     *
+-   *           STATE_APPEND_OP_EVENT (skip if journal    *
+-   *               |                  disabled)          *
+-   *   (retry)     v                                     *
+-   *   . . . > STATE_ALLOCATE_SNAP_ID                    *
+-   *   .           |                                     *
+-   *   .           v                                     *
+-   *   . . . . STATE_CREATE_SNAP * * * * * * * * * *     *
+-   *               |                               *     *
+-   *               v                               *     *
+-   *           STATE_CREATE_OBJECT_MAP (skip if    *     *
+-   *               |                    disabled)  *     *
+-   *               |                               *     *
+-   *               |                               v     *
+-   *               |              STATE_RELEASE_SNAP_ID  *
+-   *               |                     |               *
+-   *               |                     v               *
+-   *               \----------------> <finish> < * * * * *
++   *           STATE_SUSPEND_AIO * * * * * * * * * * * * * * *
++   *               |                                         *
++   *               v                                         *
++   *           STATE_APPEND_OP_EVENT (skip if journal        *
++   *               |                  disabled)              *
++   *   (retry)     v                                         *
++   *   . . . > STATE_ALLOCATE_SNAP_ID                        *
++   *   .           |                                         *
++   *   .           v                                         *
++   *   . . . . STATE_CREATE_SNAP * * * * * * * * * * * *     *
++   *               |                                   *     *
++   *               v                                   *     *
++   *           STATE_ADD_SNAP_TO_GC  (skip if no       *     *
++   *               |                  gc)  * * * * *   *     *
++   *               v                               *   *     *
++   *           STATE_CREATE_OBJECT_MAP (skip if    *   *     *
++   *               |                    disabled)  *   *     *
++   *               |                               *   *     *
++   *               |                               v   *     *
++   *               |                STATE_RELEASE_SNAP *     *
++   *               |                               *   *     *
++   *               |                               v   v     *
++   *               |                   STATE_RELEASE_SNAP_ID *
++   *               |                     |                   *
++   *               |                     v                   *
++   *               \----------------> <finish> < * * * * * * *
+    *
+    * @endverbatim
+    *
+@@ -103,9 +109,18 @@ private:
+   void send_create_snap();
+   Context *handle_create_snap(int *result);
+ 
++#ifdef WITH_GLOBAL_CACHE
++  Context *send_add_snap_to_gc();
++#endif
++
+   Context *send_create_object_map();
+   Context *handle_create_object_map(int *result);
+ 
++#ifdef WITH_GLOBAL_CACHE
++  void send_release_snap();
++  Context *handle_release_snap(int *result);
++#endif
++
+   void send_release_snap_id();
+   Context *handle_release_snap_id(int *result);
+ 
+diff --git a/src/librbd/operation/SnapshotRemoveRequest.cc b/src/librbd/operation/SnapshotRemoveRequest.cc
+index 69fbc3e..a9cba36 100644
+--- a/src/librbd/operation/SnapshotRemoveRequest.cc
++++ b/src/librbd/operation/SnapshotRemoveRequest.cc
+@@ -11,6 +11,11 @@
+ #include "librbd/Utils.h"
+ #include "librbd/image/DetachChildRequest.h"
+ 
++#ifdef WITH_GLOBAL_CACHE
++#include "client_adaptor/ClientAdaptorPlugin.h"
++#include "client_adaptor/ClientAdaptorMgr.h"
++#endif
++
+ #define dout_subsys ceph_subsys_rbd
+ #undef dout_prefix
+ #define dout_prefix *_dout << "librbd::SnapshotRemoveRequest: " << this << " " \
+@@ -47,6 +52,16 @@ void SnapshotRemoveRequest<I>::send_op() {
+     }
+   }
+ 
++#ifdef WITH_GLOBAL_CACHE
++  PluginRegistry *reg = cct->get_plugin_registry();
++  auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
++  if (plugin == NULL) {
++    lderr(cct) << "client adaptor plugin not loaded" << dendl;
++    this->async_complete(-ELIBACC);
++    return;
++  }
++#endif
++
+   trash_snap();
+ }
+ 
+@@ -423,9 +438,56 @@ void SnapshotRemoveRequest<I>::handle_remove_snap(int r) {
+     return;
+   }
+ 
++#ifdef WITH_GLOBAL_CACHE
++  int32_t ret = remove_snap_from_gc();
++#endif
+   remove_snap_context();
++#ifdef WITH_GLOBAL_CACHE
++  this->complete(ret);
++#else
+   this->complete(0);
++#endif
++}
++
++#ifdef WITH_GLOBAL_CACHE
++template <typename I>
++int32_t SnapshotRemoveRequest<I>::remove_snap_from_gc() {
++  I &image_ctx = this->m_image_ctx;
++  int64_t pool_id = image_ctx.md_ctx.get_id();
++  std::string pool_name;
++  CephContext *cct = image_ctx.cct;
++  ldout(cct, 10) << this << " Client Adaptor: " << __func__
++                                                  << " pool_id: " << pool_id
++                                                  << " image_id: " << image_ctx.id
++                                                  << " snap_id: " << m_snap_id
++                                                  << dendl;
++
++  librados::Rados rados(image_ctx.md_ctx);
++  int ret = rados.pool_reverse_lookup(pool_id, &pool_name);
++  ceph_assert(ret == 0 && !pool_name.empty());
++
++  ldout(cct, 10) << this << " Client Adaptor: " << __func__
++                                                 << " pool_name: " << pool_name
++                                                 << " image_name: " << image_ctx.name
++                                                 << " snap_name: " << m_snap_name
++                                                 << dendl;
++  
++  PluginRegistry *reg = cct->get_plugin_registry();
++  auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
++  int mgr_ret = -ELIBACC;
++
++  if (plugin && plugin->mgr_ref) {
++      mgr_ret = plugin->mgr_ref->remove_snap_from_gc(pool_id, image_ctx.id, m_snap_id);
++  }
++
++  if (mgr_ret < 0) {
++      lderr(cct) << " Client Adaptor: " << "gc remove snapshot fail, ret=" << mgr_ret << dendl;
++  } else {
++      ldout(cct, 20) << " Client Adaptor: " << "gc remove snapshot success" << dendl;
++  }
++  return mgr_ret;
+ }
++#endif
+ 
+ template <typename I>
+ void SnapshotRemoveRequest<I>::remove_snap_context() {
+diff --git a/src/librbd/operation/SnapshotRemoveRequest.h b/src/librbd/operation/SnapshotRemoveRequest.h
+index a47bbc0..7bab65d 100644
+--- a/src/librbd/operation/SnapshotRemoveRequest.h
++++ b/src/librbd/operation/SnapshotRemoveRequest.h
+@@ -49,6 +49,9 @@ public:
+    *    v (skip if in-use)
+    * REMOVE_SNAP
+    *    |
++   *    v (skip if no gc)
++   * REMOVE_SNAP_FROM_GC
++   *    |
+    *    v
+    * <finish>
+    *
+@@ -109,6 +112,10 @@ private:
+   void remove_snap();
+   void handle_remove_snap(int r);
+ 
++#ifdef WITH_GLOBAL_CACHE
++  int32_t remove_snap_from_gc();
++#endif
++
+   void remove_snap_context();
+   int scan_for_parents(cls::rbd::ParentImageSpec &pspec);
+ 
 diff --git a/src/msg/Message.cc b/src/msg/Message.cc
-index d36a95ebe2d..e5384c3e5ca 100644
+index d36a95e..e5384c3 100644
 --- a/src/msg/Message.cc
 +++ b/src/msg/Message.cc
 @@ -202,6 +202,8 @@
@@ -1437,8 +2260,85 @@ index d36a95ebe2d..e5384c3e5ca 100644
      trace.event("created trace");
    }
    trace.keyval("tid", get_tid());
+diff --git a/src/msg/async/AsyncConnection.cc b/src/msg/async/AsyncConnection.cc
+index cab4145..98a69dd 100644
+--- a/src/msg/async/AsyncConnection.cc
++++ b/src/msg/async/AsyncConnection.cc
+@@ -360,8 +360,6 @@ void AsyncConnection::process() {
+   last_active = ceph::coarse_mono_clock::now();
+   recv_start_time = ceph::mono_clock::now();
+ 
+-  ldout(async_msgr->cct, 20) << __func__ << dendl;
+-
+   switch (state) {
+     case STATE_NONE: {
+       ldout(async_msgr->cct, 20) << __func__ << " enter none state" << dendl;
+@@ -758,12 +756,30 @@ void AsyncConnection::tick(uint64_t id)
+   } else {
+     auto idle_period = std::chrono::duration_cast<std::chrono::microseconds>
+       (now - last_active).count();
++
+     if (inactive_timeout_us < (uint64_t)idle_period) {
++#ifdef WITH_GLOBAL_CACHE
++      int con_port = target_addr.get_port();
++      if (con_port >= lower_port && con_port <= upper_port) {
++        ldout(async_msgr->cct, 1) << __func__ << " idle (" << idle_period
++                                << ") for more than " << inactive_timeout_us
++                                << " us, keep establish."
++                                << dendl;
++        last_tick_id = center->create_time_event(inactive_timeout_us, tick_handler);
++      } else {
++        ldout(async_msgr->cct, 1) << __func__ << " idle (" << idle_period
++                                << ") for more than " << inactive_timeout_us
++                                << " us, fault."
++                                << dendl;
++        protocol->fault();
++      }
++#else
+       ldout(async_msgr->cct, 1) << __func__ << " idle (" << idle_period
+                                 << ") for more than " << inactive_timeout_us
+                                 << " us, fault."
+                                 << dendl;
+       protocol->fault();
++#endif
+     } else {
+       last_tick_id = center->create_time_event(inactive_timeout_us, tick_handler);
+     }
+diff --git a/src/msg/async/AsyncConnection.h b/src/msg/async/AsyncConnection.h
+index 5b914cc..301cc89 100644
+--- a/src/msg/async/AsyncConnection.h
++++ b/src/msg/async/AsyncConnection.h
+@@ -136,6 +136,16 @@ class AsyncConnection : public Connection {
+     return target_addr;
+   }
+ 
++#ifdef WITH_GLOBAL_CACHE
++  uint32_t get_port_lower_boundary() const {
++    return lower_port;
++  }
++
++  uint32_t get_port_upper_boundary() const {
++    return upper_port;
++  }
++#endif
++
+   int get_con_mode() const override;
+ 
+  private:
+@@ -202,6 +212,11 @@ class AsyncConnection : public Connection {
+ 
+   entity_addr_t _infer_target_addr(const entity_addrvec_t& av);
+ 
++#ifdef WITH_GLOBAL_CACHE
++  const uint32_t lower_port = 7880;
++  const uint32_t upper_port = 7889;
++#endif
++
+   // used only by "read_until"
+   uint64_t state_offset;
+   Worker *worker;
 diff --git a/src/msg/async/ProtocolV2.cc b/src/msg/async/ProtocolV2.cc
-index 4b03f5eb..7bc18292 100644
+index 4b03f5e..d5211fa 100644
 --- a/src/msg/async/ProtocolV2.cc
 +++ b/src/msg/async/ProtocolV2.cc
 @@ -13,6 +13,12 @@
@@ -1454,7 +2354,27 @@ index 4b03f5eb..7bc18292 100644
  #define dout_subsys ceph_subsys_ms
  #undef dout_prefix
  #define dout_prefix _conn_prefix(_dout)
-@@ -1708,6 +1714,37 @@ CtPtr ProtocolV2::send_auth_request(std::vector<uint32_t> &allowed_methods) {
+@@ -360,7 +366,18 @@ CtPtr ProtocolV2::_fault() {
+       if (backoff > cct->_conf->ms_max_backoff)
+         backoff.set_from_double(cct->_conf->ms_max_backoff);
+     }
+-
++#ifdef WITH_GLOBAL_CACHE
++    entity_addr_t con_target_addr = connection->get_peer_socket_addr();
++    int con_port = con_target_addr.get_port();
++    uint32_t gc_lower_port = connection->get_port_lower_boundary();
++    uint32_t gc_upper_port = connection->get_port_upper_boundary();
++    if (backoff.sec() >= (__u32)trunc(cct->_conf->ms_max_backoff) && con_port >= gc_lower_port && con_port <= gc_upper_port) {
++      ldout(cct, 1) << __func__ << " reconnect timeout more reset connection con_port " << con_port << dendl;
++      stop();
++      connection->dispatch_queue->queue_reset(connection);
++      return nullptr;
++    }
++#endif
+     if (server_cookie) {
+       connect_seq++;
+     }
+@@ -1708,6 +1725,37 @@ CtPtr ProtocolV2::send_auth_request(std::vector<uint32_t> &allowed_methods) {
    vector<uint32_t> preferred_modes;
    auto am = auth_meta;
    connection->lock.unlock();
@@ -1475,24 +2395,24 @@ index 4b03f5eb..7bc18292 100644
 +    int r = messenger->auth_client->get_auth_request(
 +      connection, am.get(),
 +      &am->auth_method, &preferred_modes, &bl);
-+    connection->lock.lock();
-+    if (state != AUTH_CONNECTING) {
-+      ldout(cct, 1) << __func__ << " state changed!" << dendl;
-+      return _fault();
-+    }
-+    if (r < 0) {
-+      ldout(cct, 0) << __func__ << " get_initial_auth_request returned " << r
-+        << dendl;
-+      stop();
-+      connection->dispatch_queue->queue_reset(connection);
-+      return nullptr;
-+    }
++      connection->lock.lock();
++      if (state != AUTH_CONNECTING) {
++        ldout(cct, 1) << __func__ << " state changed!" << dendl;
++        return _fault();
++      }
++      if (r < 0) {
++        ldout(cct, 0) << __func__ << " get_initial_auth_request returned " << r
++          << dendl;
++        stop();
++        connection->dispatch_queue->queue_reset(connection);
++        return nullptr;
++      }
 +  }
 +#else
    int r = messenger->auth_client->get_auth_request(
      connection, am.get(),
      &am->auth_method, &preferred_modes, &bl);
-@@ -1723,6 +1760,7 @@ CtPtr ProtocolV2::send_auth_request(std::vector<uint32_t> &allowed_methods) {
+@@ -1723,6 +1771,7 @@ CtPtr ProtocolV2::send_auth_request(std::vector<uint32_t> &allowed_methods) {
      connection->dispatch_queue->queue_reset(connection);
      return nullptr;
    }
@@ -1500,7 +2420,7 @@ index 4b03f5eb..7bc18292 100644
  
    INTERCEPT(9);
  
-@@ -1811,6 +1849,37 @@ CtPtr ProtocolV2::handle_auth_done(ceph::bufferlist &payload)
+@@ -1811,6 +1860,37 @@ CtPtr ProtocolV2::handle_auth_done(ceph::bufferlist &payload)
    ceph_assert(messenger->auth_client);
    auto am = auth_meta;
    connection->lock.unlock();
@@ -1538,7 +2458,15 @@ index 4b03f5eb..7bc18292 100644
    int r = messenger->auth_client->handle_auth_done(
      connection,
      am.get(),
-@@ -1827,6 +1896,7 @@ CtPtr ProtocolV2::handle_auth_done(ceph::bufferlist &payload)
+@@ -1819,6 +1899,7 @@ CtPtr ProtocolV2::handle_auth_done(ceph::bufferlist &payload)
+     auth_done.auth_payload(),
+     &am->session_key,
+     &am->connection_secret);
++
+   connection->lock.lock();
+   if (state != AUTH_CONNECTING) {
+     ldout(cct, 1) << __func__ << " state changed!" << dendl;
+@@ -1827,6 +1908,7 @@ CtPtr ProtocolV2::handle_auth_done(ceph::bufferlist &payload)
    if (r < 0) {
      return _fault();
    }
@@ -1547,7 +2475,7 @@ index 4b03f5eb..7bc18292 100644
    session_stream_handlers = \
      ceph::crypto::onwire::rxtx_t::create_handler_pair(cct, *auth_meta, false);
 diff --git a/src/osdc/Objecter.cc b/src/osdc/Objecter.cc
-index bc39114a..badeb02f 100644
+index bc39114..f753045 100644
 --- a/src/osdc/Objecter.cc
 +++ b/src/osdc/Objecter.cc
 @@ -51,6 +51,18 @@
@@ -1569,7 +2497,21 @@ index bc39114a..badeb02f 100644
  using ceph::real_time;
  using ceph::real_clock;
  
-@@ -236,6 +248,29 @@ void Objecter::init()
+@@ -73,7 +85,12 @@ enum {
+   l_osdc_op_send_bytes,
+   l_osdc_op_resend,
+   l_osdc_op_reply,
+-
++#ifdef WITH_GLOBAL_CACHE
++  l_osdc_op_gc_active,
++  l_osdc_op_gc_retry,
++  l_osdc_op_gc_hangon,
++  l_osdc_op_gc_resend,
++#endif
+   l_osdc_op,
+   l_osdc_op_r,
+   l_osdc_op_w,
+@@ -236,6 +253,30 @@ void Objecter::init()
  {
    ceph_assert(!initialized);
  
@@ -1589,17 +2531,35 @@ index bc39114a..badeb02f 100644
 +      ldout(cct, 3) << "Client Adaptor: " << __func__ << " Initiate DAS failed, close prefetch" << dendl;
 +    }
 +  }
-+  ldout(cct, 3) << __func__ << "Client Adaptor: PID " << dec << getpid() << " TID: " << gettid() << dendl;
++  ldout(cct, 3) << __func__ << "Client Adaptor: PID: " << dec << getpid() << " TID: " << gettid() << dendl;
 +  ldout(cct, 3) << __func__ << "Client Adaptor: Objecter pointer: " << hex << this << dendl;
 +  if (cct->_conf.get_val<bool>("global_cache_tick")) {
 +    plugin->perf_ref->start_record(plugin);
 +  }
++  gc_perf = cct->_conf.get_val<bool>("gc_perf");
 +#endif
 +
    if (!logger) {
      PerfCountersBuilder pcb(cct, "objecter", l_osdc_first, l_osdc_last);
  
-@@ -400,6 +435,43 @@ void Objecter::shutdown()
+@@ -246,6 +287,16 @@ void Objecter::init()
+     pcb.add_u64_counter(l_osdc_op_send_bytes, "op_send_bytes", "Sent data", NULL, 0, unit_t(UNIT_BYTES));
+     pcb.add_u64_counter(l_osdc_op_resend, "op_resend", "Resent operations");
+     pcb.add_u64_counter(l_osdc_op_reply, "op_reply", "Operation reply");
++#ifdef WITH_GLOBAL_CACHE
++    pcb.add_u64_counter(l_osdc_op_gc_active, "op_gc_active",
++            "Operation being sent to gc ");
++    pcb.add_u64_counter(l_osdc_op_gc_resend, "op_gc_resend",
++            "Operation being resent to gc");
++    pcb.add_u64_counter(l_osdc_op_gc_retry, "op_gc_retry",
++            "Operation need to be retried to gc, because of error");
++    pcb.add_u64_counter(l_osdc_op_gc_hangon, "op_gc_hangon",
++            "Operation being hanging because of abnormal PT");
++#endif
+ 
+     pcb.add_u64_counter(l_osdc_op, "op", "Operations");
+     pcb.add_u64_counter(l_osdc_op_r, "op_r", "Read operations", "rd",
+@@ -400,6 +451,38 @@ void Objecter::shutdown()
  {
    ceph_assert(initialized);
  
@@ -1624,28 +2584,42 @@ index bc39114a..badeb02f 100644
 +    retry_op.op_waiting_for_retry.erase(i->first);
 +  }
 +
-+  while(!retry_op.reboot_session_ops.empty()) {
-+    set<Connection*>::iterator i = retry_op.reboot_session_ops.begin();
-+    retry_op.reboot_session_ops.erase(i);
-+  }
-+
 +  while(!retry_op.reboot_retry_ops.empty()) {
 +    map<ceph_tid_t, Op*>::iterator i = retry_op.reboot_retry_ops.begin();
 +    retry_op.reboot_retry_ops.erase(i->first);
 +  }
 +
-+  while(!retry_op.reboot_retry_submit_ops.empty()) {
-+    retry_op.reboot_retry_submit_ops.pop_back();
++  while(!retry_op.hangon_retry_submit_ops.empty()) {
++    retry_op.hangon_retry_submit_ops.pop_back();
 +  }
-+  ldout(cct, 3) << __func__ << "Client Adaptor: PID " << dec << getpid() << " TID: " << gettid() << dendl;
++  ldout(cct, 3) << __func__ << "Client Adaptor: PID: " << dec << getpid() << " TID: " << gettid() << dendl;
 +  ldout(cct, 3) << __func__ << "Client Adaptor: Objecter pointer: " << hex << this << dendl;
 +#endif
    unique_lock wl(rwlock);
  
    initialized = false;
-@@ -1234,12 +1306,26 @@ void Objecter::handle_osd_map(MOSDMap *m)
- 			 need_resend_linger, need_resend_command, sul,
- 			 &m->gap_removed_snaps);
+@@ -1229,17 +1312,41 @@ void Objecter::handle_osd_map(MOSDMap *m)
+ 	for (map<int,OSDSession*>::iterator p = osd_sessions.begin();
+ 	     p != osd_sessions.end(); ) {
+ 	  OSDSession *s = p->second;
+-	  _scan_requests(s, skipped_map, cluster_full,
+-			 &pool_full_map, need_resend,
+-			 need_resend_linger, need_resend_command, sul,
+-			 &m->gap_removed_snaps);
++#ifdef WITH_GLOBAL_CACHE
++    if (!(p->first >> 20)) {
++      _scan_requests(s, skipped_map, cluster_full,
++              &pool_full_map, need_resend,
++              need_resend_linger, need_resend_command, sul,
++              &m->gap_removed_snaps);
++    }
++#else
++      _scan_requests(s, skipped_map, cluster_full,
++              &pool_full_map, need_resend,
++              need_resend_linger, need_resend_command, sul,
++              &m->gap_removed_snaps);
++
++#endif
  	  ++p;
 +#ifdef WITH_GLOBAL_CACHE
 +    PluginRegistry *reg = cct->get_plugin_registry();
@@ -1670,7 +2644,7 @@ index bc39114a..badeb02f 100644
  	}
  
  	ceph_assert(e == osdmap->get_epoch());
-@@ -1772,6 +1858,53 @@ int Objecter::_get_session(int osd, OSDSession **session, shunique_lock& sul)
+@@ -1772,6 +1879,53 @@ int Objecter::_get_session(int osd, OSDSession **session, shunique_lock& sul)
      return 0;
    }
  
@@ -1724,7 +2698,7 @@ index bc39114a..badeb02f 100644
    map<int,OSDSession*>::iterator p = osd_sessions.find(osd);
    if (p != osd_sessions.end()) {
      OSDSession *s = p->second;
-@@ -1787,6 +1920,7 @@ int Objecter::_get_session(int osd, OSDSession **session, shunique_lock& sul)
+@@ -1787,6 +1941,7 @@ int Objecter::_get_session(int osd, OSDSession **session, shunique_lock& sul)
    OSDSession *s = new OSDSession(cct, osd);
    osd_sessions[osd] = s;
    s->con = messenger->connect_to_osd(osdmap->get_addrs(osd));
@@ -1732,7 +2706,37 @@ index bc39114a..badeb02f 100644
    s->con->set_priv(RefCountedPtr{s});
    logger->inc(l_osdc_osd_session_open);
    logger->set(l_osdc_osd_sessions, osd_sessions.size());
-@@ -2363,10 +2497,20 @@ void Objecter::_op_submit(Op *op, shunique_lock& sul, ceph_tid_t *ptid)
+@@ -2181,6 +2336,12 @@ void Objecter::tick()
+     }
+   }
+ 
++#ifdef WITH_GLOBAL_CACHE
++  RetryOp::unique_lock retry_op_rl(retry_op.retrylock);
++  ldout(cct, 2) << " tick hangon_retry_submit_ops size " <<retry_op.hangon_retry_submit_ops.size()<< dendl;
++  ldout(cct, 2) << " tick op_waiting_for_retry size " <<retry_op.op_waiting_for_retry.size()<< dendl;
++  retry_op_rl.unlock();
++#endif
+   // Make sure we don't reschedule if we wake up after shutdown
+   if (initialized) {
+     tick_event = timer.reschedule_me(ceph::make_timespan(
+@@ -2296,6 +2457,16 @@ void Objecter::_send_op_account(Op *op)
+   }
+ 
+   logger->inc(l_osdc_op_active);
++#ifdef WITH_GLOBAL_CACHE
++  if (gc_perf) {
++    PluginRegistry *reg = cct->get_plugin_registry();
++    auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
++    ceph_assert(plugin);
++    if (plugin->msg_ref->filter_msg(&op->target)) {
++      logger->inc(l_osdc_op_gc_active);
++    }
++  }
++#endif
+   logger->inc(l_osdc_op);
+ 
+   if ((op->target.flags & (CEPH_OSD_FLAG_READ | CEPH_OSD_FLAG_WRITE)) ==
+@@ -2363,10 +2534,25 @@ void Objecter::_op_submit(Op *op, shunique_lock& sul, ceph_tid_t *ptid)
    // pick target
    ceph_assert(op->session == NULL);
    OSDSession *s = NULL;
@@ -1742,8 +2746,13 @@ index bc39114a..badeb02f 100644
 +    == RECALC_OP_TARGET_POOL_DNE;
  
 +  if (!pt_stat) {
-+    retry_op.reboot_retry_submit_ops.push_back(op);
-+    ldout(cct, 3) << " this " << this << " " << __func__ << " op " << op << "pt unnormal, hang on IO waiting for retry by pt normal trigger " << dendl;
++    unique_lock rl(retry_op.retrylock);
++    retry_op.hangon_retry_submit_ops.push_back(op);
++    rl.unlock();
++    if (gc_perf) {
++        logger->inc(l_osdc_op_gc_hangon);
++    }
++    ldout(cct, 1) << " this " << this << " " << __func__ << " op " << op << "pt unnormal, hang on IO waiting for retry by pt normal trigger " << dendl;
 +    return;
 +  }
 +#else
@@ -1754,7 +2763,7 @@ index bc39114a..badeb02f 100644
    // Try to get a session, including a retry if we need to take write lock
    int r = _get_session(op->target.osd, &s, sul);
    if (r == -EAGAIN ||
-@@ -2382,8 +2526,19 @@ void Objecter::_op_submit(Op *op, shunique_lock& sul, ceph_tid_t *ptid)
+@@ -2382,8 +2568,24 @@ void Objecter::_op_submit(Op *op, shunique_lock& sul, ceph_tid_t *ptid)
        // map changed; recalculate mapping
        ldout(cct, 10) << __func__ << " relock raced with osdmap, recalc target"
  		     << dendl;
@@ -1763,8 +2772,13 @@ index bc39114a..badeb02f 100644
 +        == RECALC_OP_TARGET_POOL_DNE;
 +
 +      if (!pt_stat) {
-+        retry_op.reboot_retry_submit_ops.push_back(op);
-+        ldout(cct, 3) << __func__ << " op " << op << "pt unnormal, hang on IO waiting for retry by pt normal trigger " << dendl;
++        unique_lock rl(retry_op.retrylock);
++        retry_op.hangon_retry_submit_ops.push_back(op);
++        rl.unlock();
++        if (gc_perf) {
++            logger->inc(l_osdc_op_gc_hangon);
++        }
++        ldout(cct, 1) << __func__ << " op " << op << "pt unnormal, hang on IO waiting for retry by pt normal trigger " << dendl;
 +        return;
 +      }
 +#else
@@ -1775,7 +2789,7 @@ index bc39114a..badeb02f 100644
        if (s) {
  	put_session(s);
  	s = NULL;
-@@ -2453,6 +2608,17 @@ void Objecter::_op_submit(Op *op, shunique_lock& sul, ceph_tid_t *ptid)
+@@ -2453,6 +2655,17 @@ void Objecter::_op_submit(Op *op, shunique_lock& sul, ceph_tid_t *ptid)
    _session_op_assign(s, op);
  
    if (need_send) {
@@ -1793,7 +2807,7 @@ index bc39114a..badeb02f 100644
      _send_op(op);
    }
  
-@@ -2770,6 +2936,231 @@ void Objecter::_prune_snapc(
+@@ -2770,6 +2983,231 @@ void Objecter::_prune_snapc(
    }
  }
  
@@ -1807,7 +2821,7 @@ index bc39114a..badeb02f 100644
 +    t->target_oid = t->base_oid;
 +    t->target_oloc = t->base_oloc;
 +    ldout(cct, 3) << " Client Adaptor: " << __func__ << " msg filter pass to Global Cache" << dendl;
-+    int64_t pool_id = t->base_oloc.pool;
++    uint64_t pool_id = t->base_oloc.pool;
 +    uint32_t pt_id = 0;
 +    int32_t node_id = plugin->msg_ref->get_node_id(t->base_oid.name, pool_id, pt_id);
 +    if (node_id < 0) {
@@ -1816,7 +2830,7 @@ index bc39114a..badeb02f 100644
 +    }
 +    ldout(cct, 3) << "Client Adaptor: " << __func__ << " Send to PT " << pt_id << dendl;
 +    t->actual_pgid.pgid.set_pool(t->base_oloc.pool);
-+    ldout(cct, 3) << "Client Adaptor: " << __func__ << " Pool ID = " << t->actual_pgid.pgid.m_pool << dendl;
++    ldout(cct, 3) << "Client Adaptor: " << __func__ << " Pool ID = " << t->actual_pgid.pgid.m_pool << " pt version =" << (pool_id >> 32)<< dendl;
 +    ldout(cct, 3) << "Client Adaptor: " << __func__ << " Seed = " << t->actual_pgid.pgid.m_seed << dendl;
 +    t->actual_pgid.pgid.set_ps(pt_id);
 +    t->osd = node_id;
@@ -2025,7 +3039,7 @@ index bc39114a..badeb02f 100644
  int Objecter::_calc_target(op_target_t *t, Connection *con, bool any_change)
  {
    // rwlock is locked
-@@ -2969,6 +3360,7 @@ int Objecter::_calc_target(op_target_t *t, Connection *con, bool any_change)
+@@ -2969,6 +3407,7 @@ int Objecter::_calc_target(op_target_t *t, Connection *con, bool any_change)
    return RECALC_OP_TARGET_NO_ACTION;
  }
  
@@ -2033,7 +3047,25 @@ index bc39114a..badeb02f 100644
  int Objecter::_map_session(op_target_t *target, OSDSession **s,
  			   shunique_lock& sul)
  {
-@@ -3271,6 +3663,38 @@ void Objecter::_send_op(Op *op)
+@@ -3139,7 +3578,16 @@ void Objecter::_finish_op(Op *op, int r)
+   }
+ 
+   logger->dec(l_osdc_op_active);
+-
++#ifdef WITH_GLOBAL_CACHE
++  if (gc_perf) {
++    PluginRegistry *reg = cct->get_plugin_registry();
++    auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
++    ceph_assert(plugin);
++    if (plugin->msg_ref->filter_msg(&op->target)) {
++      logger->dec(l_osdc_op_gc_active);
++    }
++  }
++#endif
+   ceph_assert(check_latest_map_ops.find(op->tid) == check_latest_map_ops.end());
+ 
+   inflight_ops--;
+@@ -3271,6 +3719,38 @@ void Objecter::_send_op(Op *op)
    if (op->trace.valid()) {
      m->trace.init("op msg", nullptr, &op->trace);
    }
@@ -2072,7 +3104,7 @@ index bc39114a..badeb02f 100644
    op->session->con->send_message(m);
  }
  
-@@ -3326,6 +3750,124 @@ int Objecter::take_linger_budget(LingerOp *info)
+@@ -3326,6 +3806,82 @@ int Objecter::take_linger_budget(LingerOp *info)
    return 1;
  }
  
@@ -2103,6 +3135,9 @@ index bc39114a..badeb02f 100644
 +    while(!op_queue.empty()) {
 +      Op* op = op_queue.front();
 +      op_queue.pop();
++      if (gc_perf) {
++        logger->dec(l_osdc_op_gc_retry);
++      }
 +      shunique_lock sul(rwlock, ceph::acquire_shared);
 +      _op_submit(op, sul, NULL);
 +      resend_errort_op_num++;
@@ -2118,86 +3153,41 @@ index bc39114a..badeb02f 100644
 +  ceph_assert(plugin);
 +
 +  rl.lock();
-+  uint32_t resend_reboot_op_num = 0;
-+  while(!retry_op.reboot_session_ops.empty()) {
-+    shunique_lock sul(rwlock, ceph::acquire_shared);
-+    set<Connection*>::iterator siter = retry_op.reboot_session_ops.begin();
-+    auto priv = (static_cast<Connection*>(*siter))->get_priv();
-+    auto session = static_cast<OSDSession*>(priv.get());
-+    ldout(cct, 1) << "retry session " << session << " session op size" << session->ops.size() << dendl;
-+    retry_op.reboot_session_ops.erase(siter);
-+
-+    string node_ip = "";
-+    uint32_t ret = plugin->msg_ref->get_node_ip(session->osd, node_ip);
-+    if (ret) {
-+      ldout(cct, 3) << "Client Adaptor: " << __func__ << " Get node ip failed, ret " << ret << dendl;
-+      ceph_abort();
-+    }
-+
-+    ldout(cct, 3) << "Client Adaptor: " << __func__ << " ip address = " << node_ip.c_str() << dendl;
-+    entity_addr_t node_addr;
-+    entity_addr_from_url(&node_addr, node_ip.c_str());
-+    node_addr.set_type(entity_addr_t::TYPE_MSGR2);
-+    entity_addrvec_t node_addrs(node_addr);
-+    OSDSession::unique_lock sl(session->lock);
-+    if (session->con) {
-+      plugin->msg_ref->connections.erase((void *)(session->con.get()));
-+      session->con->set_priv(NULL);
-+      session->con->mark_down();
-+    }
-+    session->con = messenger->connect_to_osd(node_addrs);
-+    session->con->set_priv(RefCountedPtr{session});
-+    session->incarnation++;
-+    plugin->msg_ref->connections.insert((void *)(session->con.get()));
-+
-+    for (auto it: plugin->msg_ref->connections) {
-+      ldout(cct, 3) << "Client Adaptor: con = " << it << dendl;
-+    }
-+    for (map<ceph_tid_t, Op*>::iterator p = session->ops.begin(); p != session->ops.end(); ++p) {
-+      Op *op = p->second;
-+      retry_op.reboot_retry_ops[op->tid] = op;
-+    }
-+
-+    for (map<ceph_tid_t, Op*>::iterator p = retry_op.reboot_retry_ops.begin(); p != retry_op.reboot_retry_ops.end(); ) {
-+      uint32_t pt_id = p->second->target.actual_pgid.pgid.m_seed;
-+
-+      if (plugin->mgr_ref->get_pt_status(pt_id)) {
-+        _send_op(p->second);
-+        resend_reboot_op_num++;
-+        retry_op.reboot_retry_ops.erase(p++);
-+      } else {
-+        p++;
-+      }
-+    }
-+    logger->inc(l_osdc_op_resend, retry_op.reboot_retry_ops.size());
-+    sl.unlock();
-+  }
-+  retry_op.reboot_session_ops.clear();
-+
++  
++  std::queue<Op*> op_queue;
 +  // hang on io retry
 +  uint32_t resend_hangon_op_num = 0;
-+  for (auto iter = retry_op.reboot_retry_submit_ops.begin(); iter != retry_op.reboot_retry_submit_ops.end(); ) {
++  for (auto iter = retry_op.hangon_retry_submit_ops.begin(); iter != retry_op.hangon_retry_submit_ops.end(); ) {
 +    Op *op = static_cast<Op*>(*iter);
 +    uint32_t pt_id = op->target.actual_pgid.pgid.m_seed;
 +    if (plugin->mgr_ref->get_pt_status(pt_id)) {
-+      shunique_lock sul(rwlock, ceph::acquire_shared);
-+      _op_submit(op, sul, NULL);
++      op_queue.push(op);
 +      resend_hangon_op_num++;
-+      retry_op.reboot_retry_submit_ops.erase(iter);
++      retry_op.hangon_retry_submit_ops.erase(iter);
 +    } else {
++      ldout(cct, 1) << __func__ << " resend hangon_retry_submit_ops pt " << pt_id << " unnormal, resend failed"<< dendl;
 +      ++iter;
 +    }
 +  }
-+  ldout(cct, 3) << __func__ << " resend hangon op number " << resend_hangon_op_num << dendl;
++  ldout(cct, 3) << __func__ << " should resend hangon op number " << resend_hangon_op_num << " left hangon size " << retry_op.hangon_retry_submit_ops.size() << dendl;
 +  rl.unlock();
 +
++  while (!op_queue.empty()) {
++    Op* op = op_queue.front();
++    op_queue.pop();
++    if (gc_perf) {
++        logger->dec(l_osdc_op_gc_hangon);
++    }
++    shunique_lock sul(rwlock, ceph::acquire_shared);
++    _op_submit(op, sul, NULL);
++  }
 +}
 +#endif
 +
  /* This function DOES put the passed message before returning */
  void Objecter::handle_osd_op_reply(MOSDOpReply *m)
  {
-@@ -3348,7 +3890,11 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
+@@ -3348,7 +3904,11 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
      m->put();
      return;
    }
@@ -2210,7 +3200,7 @@ index bc39114a..badeb02f 100644
    OSDSession::unique_lock sl(s->lock);
  
    map<ceph_tid_t, Op *>::iterator iter = s->ops.find(tid);
-@@ -3406,7 +3952,6 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
+@@ -3406,7 +3966,6 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
    Context *onfinish = 0;
  
    int rc = m->get_result();
@@ -2218,35 +3208,38 @@ index bc39114a..badeb02f 100644
    if (m->is_redirect_reply()) {
      ldout(cct, 5) << " got redirect reply; redirecting" << dendl;
      if (op->onfinish)
-@@ -3443,8 +3988,45 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
+@@ -3443,8 +4002,48 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
      return;
    }
  
 +#ifdef WITH_GLOBAL_CACHE
 +  if (errort_filter(rc) && m->get_oid().name.find("rbd_data") != string::npos) {
-+    ldout(cct, 3) << " op " << op << " error code " << rc << ", client resubmitting" << dendl;
-+    if (op->onfinish)
-+      num_in_flight--;
-+    _session_op_remove(s, op);
-+    sl.unlock();
++       ldout(cct,1) << " op " << op << " error code " << rc << ", client resubmitting" << dendl;
++       if (op->onfinish)
++         num_in_flight--;
++       _session_op_remove(s, op);
++       sl.unlock();
 +
-+    op->tid = 0;
-+    op->target.flags &= ~(CEPH_OSD_FLAG_BALANCE_READS |
-+			  CEPH_OSD_FLAG_LOCALIZE_READS);
-+    op->target.pgid = pg_t();
-+    unique_lock rl(retry_op.retrylock);
-+    std::queue<Op*> insert_op;
-+    uint32_t pt_id = m->get_pg().m_seed;
-+    map<uint32_t, std::queue<Op*>>::iterator iter = retry_op.op_waiting_for_retry.find(pt_id);
-+    if (iter != retry_op.op_waiting_for_retry.end()) {
-+      iter->second.push(op);
-+    } else {
-+      insert_op.push(op);
-+      retry_op.op_waiting_for_retry[pt_id] = insert_op;
-+    }
-+    rl.unlock();
-+    m->put();
-+    return;
++       op->tid = 0;
++       op->target.flags &= ~(CEPH_OSD_FLAG_BALANCE_READS |
++                         CEPH_OSD_FLAG_LOCALIZE_READS);
++       op->target.pgid = pg_t();
++       unique_lock rl(retry_op.retrylock);
++       std::queue<Op*> insert_op;
++       uint32_t pt_id = m->get_pg().m_seed;
++       map<uint32_t, std::queue<Op*>>::iterator iter = retry_op.op_waiting_for_retry.find(pt_id);
++       if (iter != retry_op.op_waiting_for_retry.end()) {
++               iter->second.push(op);
++       } else {
++               insert_op.push(op);
++               retry_op.op_waiting_for_retry[pt_id] = insert_op;
++       }
++       rl.unlock();
++       if (gc_perf) {
++                logger->inc(l_osdc_op_gc_retry);
++       }
++       m->put();
++       return;
 +  }
 +#endif
    sul.unlock();
@@ -2264,23 +3257,62 @@ index bc39114a..badeb02f 100644
    if (op->objver)
      *op->objver = m->get_user_version();
    if (op->reply_epoch)
-@@ -4399,6 +4981,14 @@ bool Objecter::ms_handle_reset(Connection *con)
+@@ -4399,6 +4998,53 @@ bool Objecter::ms_handle_reset(Connection *con)
      if (session) {
        ldout(cct, 1) << "ms_handle_reset " << con << " session " << session
  		    << " osd." << session->osd << dendl;
 +#ifdef WITH_GLOBAL_CACHE
++  if (session->osd >> 20) {
++    PluginRegistry *reg = cct->get_plugin_registry();
++    auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
++    ceph_assert(plugin);
++    OSDSession::unique_lock sl(session->lock);
++    if (session->con) {
++        plugin->msg_ref->connections.erase((void *)(session->con.get()));
++        session->con->set_priv(NULL);
++        session->con->mark_down();
++    }
++    map<ceph_tid_t,Op*> resend;
++    for (map<ceph_tid_t,Op*>::iterator p = session->ops.begin(); p != session->ops.end(); ++p) {
++        Op *op = p->second;
++        resend[op->tid] = op;
++    }
 +
-+      if (session->osd >> 20) {
-+        unique_lock rl(retry_op.retrylock);
-+        retry_op.reboot_session_ops.insert(con);
-+        rl.unlock();
++    ldout(cct, 3) << __func__ << " resend size " << resend.size()  << dendl;
++    for (map<ceph_tid_t,Op*>::iterator p = resend.begin(); p!= resend.end(); ++p ) {
++      Op *op = p->second;
++      if (op->onfinish) {
++        num_in_flight--;
 +      }
++      _session_op_remove(session, op);
++    }
++    sl.unlock();
++    close_session(session);
++
++    if (!(initialized && osdmap->is_up(session->osd))) {
++      ldout(cct, 1) << "ms_handle_reset aborted,initialized=" << initialized << dendl;
++      wl.unlock();
++
++      for (map<ceph_tid_t,Op*>::iterator p = resend.begin(); p!= resend.end(); ++p ) {
++        Op *op = p->second;
++        shunique_lock sul(rwlock, ceph::acquire_shared);
++        ldout(cct, 3) << __func__ << " resend submit op " << op  << dendl;
++        if (gc_perf && plugin->msg_ref->filter_msg_by_op(op)) {
++          logger->dec(l_osdc_op_gc_active);
++          logger->inc(l_osdc_op_gc_resend);
++        }
++        _op_submit(op, sul, NULL);
++      }
++
++      return false;
++    }
++  }
 +#endif
        // the session maybe had been closed if new osdmap just handled
        // says the osd down
        if (!(initialized && osdmap->is_up(session->osd))) {
 diff --git a/src/osdc/Objecter.h b/src/osdc/Objecter.h
-index ca8d85f7..918b41c1 100644
+index ca8d85f..9723662 100644
 --- a/src/osdc/Objecter.h
 +++ b/src/osdc/Objecter.h
 @@ -1341,7 +1341,13 @@ public:
@@ -2307,9 +3339,8 @@ index ca8d85f7..918b41c1 100644
 +
 +  struct RetryOp {
 +    map<uint32_t, std::queue<Op*>>op_waiting_for_retry; //error code retry
-+    std::set<Connection*> reboot_session_ops; //reboot lost connect
 +    map<ceph_tid_t, Op*> reboot_retry_ops; //reboot retry ops
-+    std::vector<Op*> reboot_retry_submit_ops; //reboot hang on ops
++    std::vector<Op*> hangon_retry_submit_ops; //reboot hang on ops
 +    mutable std::shared_mutex retrylock;
 +    using unique_lock = std::unique_lock<decltype(retrylock)>;
 +  };
@@ -2317,6 +3348,7 @@ index ca8d85f7..918b41c1 100644
 +  RetryOp retry_op;
  
 +  void retry_op_submit(vector<uint32_t> ready_pt_id);
++  bool gc_perf;
 +#endif
   private:
  
@@ -2364,7 +3396,7 @@ index ca8d85f7..918b41c1 100644
    /**
     * Tell the objecter to throttle outgoing ops according to its
 diff --git a/src/test/CMakeLists.txt b/src/test/CMakeLists.txt
-index 5dcee1694d1..fc342ccb90d 100644
+index 5dcee16..fc342cc 100644
 --- a/src/test/CMakeLists.txt
 +++ b/src/test/CMakeLists.txt
 @@ -31,6 +31,13 @@ add_subdirectory(fs)
@@ -2383,7 +3415,7 @@ index 5dcee1694d1..fc342ccb90d 100644
    add_subdirectory(libradosstriper)
 diff --git a/src/test/ClientAdaptorTest/CMakeLists.txt b/src/test/ClientAdaptorTest/CMakeLists.txt
 new file mode 100644
-index 00000000000..2eb494c3375
+index 0000000..2eb494c
 --- /dev/null
 +++ b/src/test/ClientAdaptorTest/CMakeLists.txt
 @@ -0,0 +1,11 @@
@@ -2400,15 +3432,15 @@ index 00000000000..2eb494c3375
 +message(STATUS "Client adaptor test cmake executing...")
 diff --git a/src/test/ClientAdaptorTest/ClientAdaptorTest.cc b/src/test/ClientAdaptorTest/ClientAdaptorTest.cc
 new file mode 100644
-index 00000000..c6bede97
+index 0000000..2d69eb1
 --- /dev/null
 +++ b/src/test/ClientAdaptorTest/ClientAdaptorTest.cc
-@@ -0,0 +1,385 @@
-+/* License:LGPL-2.1
-+ *
-+ * Copyright (c) 2021 Huawei Technologies Co., Ltf All rights reserved.
-+ *
-+ */
+@@ -0,0 +1,389 @@
++;/* License:LGPL-2.1
++*
++* Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
++*
++*/
 +
 +#include <iostream>
 +#include <string.h>
@@ -2442,16 +3474,28 @@ index 00000000..c6bede97
 +
 +  int32_t get_pt_entry(uint32_t pt_index, PTViewPtEntry* entry) override {
 +    std::cout << "Client Adaptor: PT index is" << pt_index << std::endl;
-+    entry->masterNodeId = pt_index % 3;
-+    std::cout << "Client Adaptor: PT entry master node id is" << entry->masterNodeId << std::endl;
++    entry->masterNode = pt_index % 3;
++    std::cout << "Client Adaptor: PT entry master node id is" << entry->masterNode << std::endl;
 +    return 0;
 +  }
 +
 +  int32_t get_node_info(uint32_t node_id, NodeInfo* node_info) override {
-+    strcpy(node_info->publicAddrStr, "localhost");
++    strcpy(node_info->publicAddrStr, "172.0.0.1");
 +    node_info->ports[0] = 68;
 +    node_info->portNum = 1;
 +    return 0 ;
++  }
++
++  int32_t add_snap_to_gc(const int64_t pool_id, const std::string &image_id, const uint64_t snap_id) {
++    return 0;
++  }
++
++  int32_t remove_snap_from_gc(const int64_t pool_id, const std::string &image_id, const uint64_t snap_id) {
++    return 0;
++  }
++
++  int32_t remove_gc_image_resource(const int64_t pool_id, const std::string image_id) {
++    return 0;
 +  }
 +
 +  const string name() override {
@@ -2513,7 +3557,7 @@ index 00000000..c6bede97
 +  EXPECT_STREQ("ClientAdaptorCcm", mgr->name().c_str());
 +
 +  auto perf=plugin->perf_ref;
-+  std::cout << "Client Adaptor: perf name = " << perf->name() << std::endl;
++  std::cout << "Client Adaptor: perf name = " << mgr->name() << std::endl;
 +  EXPECT_STREQ("ClientAdaptorPerf", perf->name().c_str());
 +  std::lock_guard l(reg->lock);
 +  reg->remove("global_cache", "client_adaptor_plugin");
@@ -2572,7 +3616,7 @@ index 00000000..c6bede97
 +  string node_ip = "";
 +  EXPECT_EQ(0, plugin->msg_ref->get_node_ip(node_id, node_ip));
 +  std::cout << "Client Adaptor: Node IP =  " << node_ip << std::endl;
-+  EXPECT_STREQ("tcp://localhost:68", node_ip.c_str());
++  EXPECT_STREQ("tcp://172.0.0.1:68", node_ip.c_str());
 +
 +  std::lock_guard l(reg->lock);
 +  reg->remove("global_cache", "client_adaptor_plugin");
@@ -2724,8 +3768,6 @@ index 00000000..c6bede97
 +  ASSERT_TRUE(plugin);
 +
 +  uint32_t num = 0;
-+
-+
 +  string obj_name = "rbd_data.135421846e0f.0000000000000056";
 +  uint64_t pool_id = 3;
 +  uint32_t pt_index;
@@ -2733,13 +3775,11 @@ index 00000000..c6bede97
 +  plugin->msg_ref->get_node_id(obj_name, pool_id, pt_index);
 +  PTViewPtEntry *entry = new PTViewPtEntry();
 +  NodeInfo *node_info = new NodeInfo();
-+  strcpy(node_info->ipv4AddrStr, "localhost");
++  strcpy(node_info->ipv4AddrStr, "172.0.0.1");
 +  node_info->ports[0] = 68;
 +  node_info->portNum = 1;
 +  plugin->mgr_ref->get_pt_num(num);
 +  plugin->mgr_ref->get_pt_entry(pt_index, entry);
-+
-+
 +  delete node_info;
 +  delete entry;
 +  std::lock_guard l(reg->lock);
@@ -2748,16 +3788,11 @@ index 00000000..c6bede97
 +
 +TEST_P(ClientAdaptorTest, MgrInfoTest2)
 +{
-+
 +  PluginRegistry *reg = g_ceph_context->get_plugin_registry();
 +  ASSERT_TRUE(reg);
 +  auto plugin = dynamic_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
 +  ASSERT_TRUE(plugin);
 +  ClientAdaptorCcm* ccm = new ClientAdaptorCcm();
-+
-+
-+
-+
 +  string obj_name = "rbd_data.135421846e0f.0000000000000056";
 +  uint32_t num = 0;
 +  uint64_t pool_id = 3;
@@ -2771,6 +3806,7 @@ index 00000000..c6bede97
 +  int32_t res2 = ccm->get_pt_entry(pt_index,entry);
 +  int32_t res3 = ccm->get_node_info(node_id,node_info);
 +
++  EXPECT_EQ(0, res);
 +  std::cout << "Mgr init result: " << res << std::endl;
 +  std::cout << "Mgr init result: " << res1 << std::endl;
 +  std::cout << "Mgr init result: " << res2 << std::endl;
@@ -2791,7 +3827,7 @@ index 00000000..c6bede97
 +);  
 diff --git a/src/test/ServerAdaptorSimulate/CMakeLists.txt b/src/test/ServerAdaptorSimulate/CMakeLists.txt
 new file mode 100644
-index 00000000000..547e1dd9257
+index 0000000..547e1dd
 --- /dev/null
 +++ b/src/test/ServerAdaptorSimulate/CMakeLists.txt
 @@ -0,0 +1,9 @@
@@ -2806,26 +3842,10 @@ index 00000000000..547e1dd9257
 +)
 diff --git a/src/test/ServerAdaptorSimulate/global_cache_dispatcher.cc b/src/test/ServerAdaptorSimulate/global_cache_dispatcher.cc
 new file mode 100644
-index 00000000..bd249272
+index 0000000..baa2d88
 --- /dev/null
 +++ b/src/test/ServerAdaptorSimulate/global_cache_dispatcher.cc
-@@ -0,0 +1,166 @@
-+/*
-+* Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
-+*
-+* Licensed under the Apache License, Version 2.0 (the "License");
-+* you may not use this file except in compliance with the License.
-+* You may obtain a copy of the License at
-+*
-+*	http://www.apache.org/licenses/LICENSE-2.0
-+* 
-+* Unless required by applicable law or agreed to in writing, software
-+* distributed under the License is distributed on an "AS IS" BASIS,
-+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-+* See the License for the specific language governing permissions and
-+* limitations under the License.
-+*/
-+
+@@ -0,0 +1,150 @@
 +#include <string>
 +#include <iostream>
 +#include <iomanip>
@@ -2978,25 +3998,23 @@ index 00000000..bd249272
 +}    // nothing
 diff --git a/src/test/ServerAdaptorSimulate/global_cache_dispatcher.h b/src/test/ServerAdaptorSimulate/global_cache_dispatcher.h
 new file mode 100644
-index 00000000..b503739c
+index 0000000..b2ce439
 --- /dev/null
 +++ b/src/test/ServerAdaptorSimulate/global_cache_dispatcher.h
-@@ -0,0 +1,110 @@
-+/*
-+* Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
-+*
-+* Licensed under the Apache License, Version 2.0 (the "License");
-+* you may not use this file except in compliance with the License.
-+* You may obtain a copy of the License at
-+*
-+*	http://www.apache.org/licenses/LICENSE-2.0
-+* 
-+* Unless required by applicable law or agreed to in writing, software
-+* distributed under the License is distributed on an "AS IS" BASIS,
-+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-+* See the License for the specific language governing permissions and
-+* limitations under the License.
-+*/
+@@ -0,0 +1,108 @@
++
++
++
++
++
++
++
++
++
++
++
++
++
 +
 +#ifndef GLOBAL_CACHE_DISPATCHER_H_
 +#define GLOBAL_CACHE_DISPATCHER_H_
@@ -3094,23 +4112,23 @@ index 00000000..b503739c
 +
 diff --git a/src/test/ServerAdaptorSimulate/global_cache_server.cc b/src/test/ServerAdaptorSimulate/global_cache_server.cc
 new file mode 100644
-index 00000000..6a1f0e4b
+index 0000000..486825a
 --- /dev/null
 +++ b/src/test/ServerAdaptorSimulate/global_cache_server.cc
 @@ -0,0 +1,131 @@
-+// -*- mode:C++; tab-width:8; c-basc-offset:2; indent-tabs-mode:t -*-
-+// vim: ts=8 sw=2 smarttab
-+/*
-+ * Ceph - scalable distributed file system
-+ *
-+ * Copyright (C) 2013 CohortFS, LLC
-+ *
-+ * This is free software; you can redistribute it and/or
-+ * modify it under the terms og the GNU Lesser General Public
-+ * License version 2.1, as published by the Free Software
-+ * Foundation. See file COPYING.
-+ *
-+ */
++
++
++
++
++
++
++
++
++
++
++
++
++
 +
 +#include <sys/types.h>
 +
@@ -3230,7 +4248,7 @@ index 00000000..6a1f0e4b
 +    return r;
 +}
 diff --git a/src/test/librbd/io/test_mock_ImageRequestWQ.cc b/src/test/librbd/io/test_mock_ImageRequestWQ.cc
-index 50daa83c777..209740a8d07 100644
+index 50daa83..209740a 100644
 --- a/src/test/librbd/io/test_mock_ImageRequestWQ.cc
 +++ b/src/test/librbd/io/test_mock_ImageRequestWQ.cc
 @@ -58,6 +58,11 @@ struct ImageDispatchSpec<librbd::MockTestImageCtx> {
@@ -3246,7 +4264,7 @@ index 50daa83c777..209740a8d07 100644
    MOCK_CONST_METHOD0(start_op, void());
    MOCK_CONST_METHOD0(send, void());
 diff --git a/src/test/messenger/simple_client.cc b/src/test/messenger/simple_client.cc
-index ba7ed2b0..8b1eee76 100644
+index ba7ed2b..8b1eee7 100644
 --- a/src/test/messenger/simple_client.cc
 +++ b/src/test/messenger/simple_client.cc
 @@ -30,6 +30,7 @@ using namespace std;
@@ -3335,7 +4353,7 @@ index ba7ed2b0..8b1eee76 100644
  
  	// do stuff
 diff --git a/src/test/messenger/simple_dispatcher.cc b/src/test/messenger/simple_dispatcher.cc
-index b13958d3686..7e1011bbd60 100644
+index b13958d..7e1011b 100644
 --- a/src/test/messenger/simple_dispatcher.cc
 +++ b/src/test/messenger/simple_dispatcher.cc
 @@ -17,6 +17,8 @@
@@ -3395,7 +4413,7 @@ index b13958d3686..7e1011bbd60 100644
    //m->put();
  
 diff --git a/src/test/messenger/simple_server.cc b/src/test/messenger/simple_server.cc
-index 8b85f3afbcf..34feff15552 100644
+index 8b85f3a..34feff1 100644
 --- a/src/test/messenger/simple_server.cc
 +++ b/src/test/messenger/simple_server.cc
 @@ -28,6 +28,8 @@ using namespace std;
@@ -3450,7 +4468,7 @@ index 8b85f3afbcf..34feff15552 100644
  
  	// done
 diff --git a/src/vstart.sh b/src/vstart.sh
-index 37aa28b7375..a146de36a55 100755
+index 37aa28b..a146de3 100644
 --- a/src/vstart.sh
 +++ b/src/vstart.sh
 @@ -752,6 +752,8 @@ EOF
