@@ -13,7 +13,7 @@
 #include "objclass/objclass.h"
 #include "common/Mutex.h"
 
-
+// forward declaration
 class CephContext;
 
 class ClassHandler {
@@ -54,10 +54,10 @@ public:
    struct ClassData {
 	enum Status {
 	  CLASS_UNKNOWN,
-          CLASS_MISSING,
-	  CLASS_MISSING_DEPS,
-	  CLASS_INITIALIZING,
-	  CLASS_OPEN,
+          CLASS_MISSING,   //missing 
+	  CLASS_MISSING_DEPS,  //missing dependencies
+	  CLASS_INITIALIZING,  //calling init() right now
+	  CLASS_OPEN,          //initialized,usable
 	} status;
 
 	string name;
@@ -69,7 +69,7 @@ public:
 	map<string, ClassMethod>methods_map;
 	map<string, ClassFilter>filters_map;
 
-	set<ClassData *> dependencies;
+	set<ClassData *> dependencies;         
 	set<ClassData *> missing_dependencies;
 
 	ClassMethod *_get_method(const char *mname);

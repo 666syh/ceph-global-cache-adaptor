@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.14)
 message("Start server adaptor cmake job.")
 set(OSA osa)
 set(INSTALL_LIBDIR "lib64")
-
+set(CMAKE_CXX_FLAGS " ")
 if (${CMAKE_BUILD_TYPE} STREQUAL "RELEASE")
     message("OpenServerAdaptor cmake This is RELEASE")
     set(COMPILE_FLAGS "-Wl,-z,relro,-z,now -s -fstack-protector-all -D_FILE_OFFSET_BITS=64 -D_GNU_SOURCE -D__linux__ -Wall -Wtype-limits -Wignored-qualifiers -Winit-self -Wpointer-arith -fno-strict-aliasing -fsigned-char -Wno-unknown-pragmas -rdynamic  -ftemplate-depth-1024 -Wnon-virtual-dtor -Wno-unknown-pragmas -Wno-ignored-qualifiers -Wstrict-null-sentinel -Woverloaded-virtual -fno-new-ttp-matching -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 -fstack-protector-strong -fdiagnostics-color=auto -fno-builtin-malloc -fno-builtin-calloc -fno-builtin-realloc -fno-builtin-free -O2 -DNDEBUG -fPIE -DHAVE_CONFIG_H -D__CEPH__ -D_REENTRANT -D_THREAD_SAFE -D__STDC_FORMAT_MACROS -std=c++1z -ldl -lrt -lresolv -lpthread")
@@ -21,6 +21,9 @@ if(${FTDS})
     set(CMAKE_CXX_FLAGS -DFTDS_ON)
 endif()
 
+if (${USE_ASAN})
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fsanitize=leak -fno-omit-frame-pointer -fno-common")
+endif()
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${COMPILE_FLAGS}")
 message("OpenServerAdaptor CMAKE_CXX_FLAGS = ${CMAKE_CXX_FLAGS}")
 

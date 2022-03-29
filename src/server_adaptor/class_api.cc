@@ -247,7 +247,10 @@ int cls_cxx_stat2(cls_method_context_t hctx, uint64_t *size, ceph::real_time *mt
 	int r;
 
 	op.opSubType = CEPH_OSD_OP_STAT;
-	op.objName = ptr->get_oid().name;
+	op.isRbd = pOpReq->vecOps[pctx->opId].isRbd;
+	op.rbdObjId.head = pOpReq->vecOps[pctx->opId].rbdObjId.head;
+	op.rbdObjId.sequence = pOpReq->vecOps[pctx->opId].rbdObjId.sequence;
+	op.objName = pOpReq->vecOps[pctx->opId].objName; // ptr->get_oid().name;
 
 	vector<OSDOp> ops(1);
 	ops.swap(ptr->ops);
@@ -289,6 +292,9 @@ int cls_cxx_read2(cls_method_context_t hctx, int ofs, int len,
 	OpRequestOps op;
 	int r;
 
+	if (len <= 0 || len >= (INT_MAX -2)) {
+		return -EINVAL;
+	}
 	op.opSubType = CEPH_OSD_OP_SYNC_READ;
 	op.objName = ptr->get_oid().name;
 	op.objOffset = ofs;
@@ -323,7 +329,10 @@ int cls_cxx_write2(cls_method_context_t hctx, int ofs, int len, bufferlist *inbl
 	OpRequestOps op;
 	
 	op.opSubType = CEPH_OSD_OP_WRITE;
-	op.objName = ptr->get_oid().name;
+	op.isRbd = pOpReq->vecOps[pctx->opId].isRbd;
+	op.rbdObjId.head = pOpReq->vecOps[pctx->opId].rbdObjId.head;
+	op.rbdObjId.sequence = pOpReq->vecOps[pctx->opId].rbdObjId.sequence;
+	op.objName = pOpReq->vecOps[pctx->opId].objName; // ptr->get_oid().name;
 	op.objOffset = ofs;
 	op.objLength = len;
 	op.inData = inbl->c_str();

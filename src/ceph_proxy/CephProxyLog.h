@@ -53,7 +53,7 @@
 
 #define ProxyDbgCritLimit(peroid, frequency, format, ...)                    \
 	do {						\
-		bool bLogErrorPrint = false;
+		bool bLogErrorPrint = false;						\
 		PRINT_LIMIT_PERIOD(DBG_LOG_CRI, MY_PID, period, frequency, bLogErrorPrint);  \
 		if (bLogErrorPrint) {												\
 			GCI_LOGGER_CRITICAL(MY_PID, "[PROXY]" format, ## __VA_ARGS__);	\
@@ -62,7 +62,7 @@
 
 #define ProxyDbgLogErrLimit(peroid, frequency, format, ...)                    \
 	do {						\
-		bool bLogErrorPrint = false;
+		bool bLogErrorPrint = false;						\
 		PRINT_LIMIT_PERIOD(DBG_LOG_ERROR, MY_PID, period, frequency, bLogErrorPrint);  \
 		if (bLogErrorPrint) {												\
 			GCI_LOGGER_ERR(MY_PID, "[PROXY]" format, ## __VA_ARGS__);	\
@@ -71,7 +71,7 @@
 
 #define ProxyDbgLogWarnLimit(peroid, frequency, format, ...)                    \
 	do {						\
-		bool bLogErrorPrint = false;
+		bool bLogErrorPrint = false;						\
 		PRINT_LIMIT_PERIOD(DBG_LOG_WARNING, MY_PID, period, frequency, bLogErrorPrint);  \
 		if (bLogErrorPrint) {												\
 			GCI_LOGGER_WARN(MY_PID, "[PROXY]" format, ## __VA_ARGS__);	\
@@ -80,7 +80,7 @@
 
 #define ProxyDbgLogInfoLimit(peroid, frequency, format, ...)                    \
 	do {						\
-		bool bLogErrorPrint = false;
+		bool bLogErrorPrint = false;						\
 		PRINT_LIMIT_PERIOD(DBG_LOG_INFO, MY_PID, period, frequency, bLogErrorPrint);  \
 		if (bLogErrorPrint) {												\
 			GCI_LOGGER_INFO(MY_PID, "[PROXY]" format, ##__VA_ARGS__);	\
@@ -89,7 +89,7 @@
 
 #define ProxyDbgLogDebugLimit(peroid, frequency, format, ...)                    \
 	do {						\
-		bool bLogErrorPrint = false;
+		bool bLogErrorPrint = false;						\
 		PRINT_LIMIT_PERIOD(DBG_LOG_DEBUG, MY_PID, period, frequency, bLogErrorPrint);  \
 		if (bLogErrorPrint) {												\
 			GCI_LOGGER_DEBUG(MY_PID, "[PROXY]" format, ##__VA_ARGS__);	\
@@ -98,7 +98,7 @@
 
 #define ProxyDbgLogWarnLimit1(format, ...)                    \
 	do {						\
-		bool bLogErrorPrint = false;
+		bool bLogErrorPrint = false;						\
 		PRINT_LIMIT_PERIOD(DBG_LOG_WARNING, MY_PID, 60 * HZ, 10, bLogErrorPrint);  \
 		if (bLogErrorPrint) {												\
 			GCI_LOGGER_WARN(MY_PID, "[PROXY]" format, ## __VA_ARGS__);	\

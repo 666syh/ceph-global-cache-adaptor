@@ -31,7 +31,6 @@ const uint32_t SA_QUEUE_MIN_CAPACITY = 1;
 const uint32_t SA_MSGR_MAX_NUM = 16;
 const uint32_t SA_MSGR_MIN_NUM = 3;
 }
-void OSA_DoTest(bool testPing, bool testMosdop);
 
 ClassHandler *rpc_handler = nullptr;
 void cls_initialize(ClassHandler *ch);
@@ -122,12 +121,12 @@ int OSA_Init(SaExport &sa)
     InitSalog(sa);
     char curDate[128] = {0};
     memset(curDate, 0, sizeof(curDate));
-    string strDate = "1230-";
+    string strDate = "220321-";
     strcpy(curDate, strDate.c_str());
 #ifdef NDEBUG
-    Salog(LV_WARNING, LOG_TYPE, "OSA Init %sR", curDate);
+    Salog(LV_WARNING, LOG_TYPE, "OSA_Init %sR", curDate);
 #else
-    Salog(LV_WARNING, LOG_TYPE, "OSA Init %sD", curDate);
+    Salog(LV_WARNING, LOG_TYPE, "OSA_Init %sD", curDate);
 #endif
     string filePath = sa.GetConfPath(); 
     filePath += "config_sa.conf";
@@ -213,6 +212,18 @@ int OSA_Init(SaExport &sa)
         return ERROR_PORT;
     }
 
+    QosParam qos;
+    qos.limitWrite = readConfig.GetWriteQoS();
+    qos.getQuotaCycle = readConfig.GetQuotCyc();
+    qos.enableThrottle = readConfig.GetMessengerThrottle();
+    Salog(LV_WARNING, LOG_TYPE, "SA QoS limitWrite=%d, time_cyc=%d ms, enableThrottle=%d", qos.limitWrite, qos.getQuotaCycle,
+        qos.enableThrottle);
+
+    if (qos.getQuotaCycle < 1) {
+        Salog(LV_CRITICAL, LOG_TYPE, "error : get quota cycle is %d", qos.getQuotaCycle);
+        return ERROR_PORT;
+    }
+
     char szMsgrAmount[4] = {0};
     sprintf(szMsgrAmount, "%d", msgrAmount);
     Salog(LV_INFORMATION, LOG_TYPE, "Server adaptor init queueAmount=%d szMsgrAmount=%s bindCore=%d bindSaCore=%d",
@@ -236,6 +247,7 @@ int OSA_Init(SaExport &sa)
 	    Salog(LV_CRITICAL, LOG_TYPE, "error : Server adaptor Listen ip:port is empty.");
 	    return 1;
 	}
+    g_ptrNetwork->SetQosParam(qos);
 	int bindSuccess = -1;
 	ret = g_ptrNetwork->InitNetworkModule(rAddr, vecPort, sAddr, sPort, &bindSuccess);
 
@@ -243,13 +255,6 @@ int OSA_Init(SaExport &sa)
 	cls_initialize(rpc_handler);
 	rpc_init();
 	
-	if (testMode == "1") {
-            Salog(LV_INFORMATION, LOG_TYPE, "testMode is ping.");
-	    OSA_DoTest(true, false);
-	} else if (testMode == "2") {
-            Salog(LV_INFORMATION, LOG_TYPE, "testMode is MOOSDOp.");
-	    OSA_DoTest(false, true);
-	}
 	int sleepCnt = 0;
 	while (bindSuccess == -1) {
 	   SalogLimit(LV_WARNING,  LOG_TYPE, "bindSuccess == -1");
@@ -264,14 +269,6 @@ int OSA_Init(SaExport &sa)
 	}
     }
     return ret;
-}
-
-void OSA_DoTest(bool testPing, bool testMosdop)
-{
-    if (g_ptrNetwork) {
-	sleep(1);
-	g_ptrNetwork->TestSimulateClient(testPing, testMosdop);
-    }
 }
       
 int OSA_Finish()
@@ -353,6 +350,12 @@ void OSA_EncodeGetOpstat(uint64_t psize, time_t ptime, int i, void *p)
     EncodeGetOpstat(psize, ptime, i, ptr);
 }
 
+void OSA_EncodeListSnaps(const ObjSnaps *objSnaps, int i, void *p)
+{
+    MOSDOp *ptr = (MOSDOp *)(p);
+    EncodeListSnaps(objSnaps, i, ptr);
+}
+
 int OSA_ExecClass(SaOpContext *pctx, PREFETCH_FUNC prefetch)
 {
     struct SaOpReq * pOpReq = pctx->opReq;
@@ -381,6 +384,10 @@ int OSA_ExecClass(SaOpContext *pctx, PREFETCH_FUNC prefetch)
 	osdop.objOffset = offset;
 	osdop.objLength = len;
 	return prefetch(pOpReq, &osdop);
+    } else if (cname.compare("rbd") == 0 && mname.compare("copyup") == 0) {
+        if (cls_cxx_stat(pctx, NULL, NULL) == 0)
+            return 0;
+        return cls_cxx_write(pctx, 0, indata.length(), &indata);
     }
     ClassHandler::ClassData *cls;
     int ret = rpc_handler->open_class(cname, &cls);

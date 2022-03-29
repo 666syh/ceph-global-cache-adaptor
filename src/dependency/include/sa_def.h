@@ -1,18 +1,18 @@
 /*
-* Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
-*
-* Licensed under the Apache License, Version 2.0 (the "License");
-* you may not use this file except in compliance with the License.
-* You may obtain a copy of the License at
-*
-*	http://www.apache.org/licenses/LICENSE-2.0
-* 
-* Unless required by applicable law or agreed to in writing, software
-* distributed under the License is distributed on an "AS IS" BASIS,
-* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-* See the License for the specific language governing permissions and
-* limitations under the License.
-*/
+ * Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *	http://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 #ifndef SA_DEF_H
 #define SA_DEF_H
@@ -35,6 +35,8 @@ constexpr int POOL_OP = 1;
 constexpr int GCACHE_DEFAULT = 0;
 constexpr int GCACHE_WRITE = 1;
 constexpr int GCACHE_READ = 2;
+
+constexpr int SA_QOS_MAX_NUM = 200;
 
 struct OptionsType {
     uint32_t write;
@@ -73,6 +75,8 @@ struct OpRequestOps {
 
     uint32_t objLength { 0 };
 
+    uint32_t opFlags {0};
+
     std::vector<std::string> keys {};
     
     std::vector<std::string> values {};
@@ -99,6 +103,11 @@ struct SaOpReq {
     uint64_t poolId { 0 };
 
     uint64_t ts { 0 };
+
+    uint64_t snapSeq { 0 };
+    std::vector<uint64_t> snaps {};
+
+    uint64_t ptVersion { 0 };
     SaOpReq &operator = (const struct SaOpReq &other)
     {
 	if (this == &other) {
@@ -112,6 +121,9 @@ struct SaOpReq {
 	ptId = other.ptId;
 	poolId = other.poolId;
 	ts = other.ts;
+    snapSeq = other.snapSeq;
+    snaps = other.snaps;
+    ptVersion = other.ptVersion;
 	return *this;
     }
 
@@ -125,6 +137,9 @@ struct SaOpReq {
 	ptId=other.ptId;
 	poolId=other.poolId;
 	ts=other.ts;
+    snapSeq = other.snapSeq;
+    snaps = other.snaps;
+    ptVersion = other.ptVersion;
     }
     SaOpReq() {}
 };
@@ -159,5 +174,13 @@ struct SaBatchKeys {
     SaStr *keys;
     uint32_t nums;
 };
+
+struct SaWcacheQosInfo {
+    uint16_t ptNum;
+    uint32_t writeRatio;
+    uint16_t ptList[SA_QOS_MAX_NUM];
+    uint32_t ptUseRatio[SA_QOS_MAX_NUM];
+};
+
 #endif
 

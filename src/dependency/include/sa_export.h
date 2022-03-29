@@ -43,6 +43,8 @@ public :
     void FtdsEndNormal(unsigned int id, uint64_t ts, int ret);
     void FtdsStartHigh(unsigned int id, uint64_t ts);
     void FtdsEndHigt(unsigned int id, uint64_t ts, int ret);
+
+    void GetWriteQuota(unsigned int poolId, SaWcacheQosInfo &info);
 };
 
 #endif

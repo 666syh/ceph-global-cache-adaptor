@@ -22,7 +22,7 @@
 #include <stdio.h>
 #include <string.h>
 
-
+// #include "common.h"
 
 #define CLUSTER_CONFIG_FILE "/home/config_sa.conf"
 #define CONFIG_BUFFSIZE 500
@@ -49,6 +49,11 @@ static const char *MSGR_AMOUNT = "msgr_amount";
 static const char *BIND_CORE = "bind_core";
 static const char *BIND_QUEUE_CORE = "bind_queue_core";
 static const char *PERF = "perf";
+
+static const char *WRITE_QOS = "write_qos";
+static const char *GET_QUOTA_CYC = "get_quota_cyc";
+static const char *GET_MESSENGER_THROTTLE = "enable_messenger_throttle";
+
 
 #ifndef RETURN_OK
 #define RETURN_OK 0
@@ -83,6 +88,10 @@ typedef struct {
 	uint64_t bindQueueCore { 0 };
 	uint64_t perf { 0 };
 	uint64_t queueMaxCapacity { 0 };
+
+	uint64_t writeOoS{0};
+	uint64_t getQuotaCyc{0};
+	uint64_t getMessengerThrottle {0};
 } SA_ClusterControlCfg;
 
 SA_ClusterControlCfg g_SaClusterControlCfg = { 0 };
@@ -241,13 +250,11 @@ static int32_t TransformValueToInt(uint8_t *pvalue, uint64_t *resultValue)
 			return RETURN_ERROR;
 		}
 	} else {
-
 		ret = StringToIntByDecimal(ptemp, &intValue);
 		if (ret != RETURN_OK){
 			return RETURN_ERROR;
 		}
 	}
-
 	*resultValue = (uint64_t)intValue;
 	return RETURN_OK;
 }
@@ -262,7 +269,6 @@ static int32_t ParseCoreConfig(char *str, uint32_t *cores, uint8_t maxCoreNum)
 		uint64_t coreid = UINT64_MAX;
 		TransformValueToInt((uint8_t *)item, &coreid);
 		if (coreid > UINT8_MAX) {
-
 			return RETURN_ERROR;
 		}
 		cores[idx] = coreid;
@@ -278,9 +284,6 @@ static int32_t AnalyzeSubString(uint8_t *str)
 	value = SearchSubString(str, LOCAL_IPV4_ADDR);
 	if (value != NULL) {
 		ConfigTrim(value);
-
-
-
 		strcpy(g_SaClusterControlCfg.ipv4AddrStr, (char *)value);
 
 		return RETURN_OK;
@@ -289,15 +292,12 @@ static int32_t AnalyzeSubString(uint8_t *str)
 	value = SearchSubString(str, LOCAL_PORT);
 	if (value != NULL) {
 		ConfigTrim(value);
-
-
 		return TransformValueToInt(value, &g_SaClusterControlCfg.port);
 	}
 
 	value = SearchSubString(str, ZK_SERVER_LIST);
 	if (value != NULL) {
 		ConfigTrim(value);
-
 		strcpy(g_SaClusterControlCfg.zkServerList, (char *)value);
 
 		return RETURN_OK;
@@ -306,41 +306,35 @@ static int32_t AnalyzeSubString(uint8_t *str)
 	value = SearchSubString(str, IOD_CORE);
 	if (value != NULL) {
 		ConfigTrim(value);
-
 		return ParseCoreConfig((char *)value, g_SaClusterControlCfg.iodCore, MAX_IOD_CORE);
 	}
 
 	value = SearchSubString(str, XNET_CORE);
 	if (value != NULL) {
 		ConfigTrim(value);
-
                 return ParseCoreConfig((char *)value, g_SaClusterControlCfg.xnetCore, MAX_XNET_CORE);
 	}
 
 	value = SearchSubString(str, DPSHM_CORE);
 	if (value != NULL) {
 		ConfigTrim(value);
-
 		return ParseCoreConfig((char *)value, g_SaClusterControlCfg.dpshmCore, MAX_DPSHM_CORE);
 	}
 	
 	value = SearchSubString(str, GVA_SLAB_OBJ_NUM);
 	if (value != NULL) {
 		ConfigTrim(value);
-
 		return TransformValueToInt(value, &g_SaClusterControlCfg.gvaSlabObjNum);
 	}
 
 	value = SearchSubString(str, USE_ONE_SIDE_RMDA);
 	if (value != NULL) {
 		ConfigTrim(value);
-
 		return TransformValueToInt(value, &g_SaClusterControlCfg.isUserOneSideRDMA);
 	}
 	value = SearchSubString(str, LISTEN_IP);
 	if (value != NULL) {
 		ConfigTrim(value);
-
 		if (strlen((char *)value) >= MAX_IPV4_ADDR_LEN) {
 			return RETURN_ERROR;
 		}
@@ -350,7 +344,6 @@ static int32_t AnalyzeSubString(uint8_t *str)
 	value = SearchSubString(str, LISTEN_PORT);
 	if (value != NULL) {
 		ConfigTrim(value);
-
 		if (strlen((char *)value) >= MAX_PORT_SIZE) {
 			return RETURN_ERROR;
 		}
@@ -360,7 +353,6 @@ static int32_t AnalyzeSubString(uint8_t *str)
 	value = SearchSubString(str, SEND_IP);
 	if (value != NULL) {
 		ConfigTrim(value);
-
 		if (strlen((char *)value) >= MAX_IPV4_ADDR_LEN) {
 			return RETURN_ERROR;
 		}
@@ -370,7 +362,6 @@ static int32_t AnalyzeSubString(uint8_t *str)
 	value = SearchSubString(str, SEND_PORT);
 	if (value != NULL) {
 		ConfigTrim(value);
-
 		if (strlen((char *)value) >= MAX_PORT_SIZE) {
 			return RETURN_ERROR;
 		}
@@ -380,7 +371,6 @@ static int32_t AnalyzeSubString(uint8_t *str)
 	value = SearchSubString(str, TEST_MODE);
 	if (value != NULL) {
 		ConfigTrim(value);
-
 		 if (strlen((char *)value) >= MAX_PORT_SIZE) {
 			 return RETURN_ERROR;
 		 }
@@ -390,52 +380,53 @@ static int32_t AnalyzeSubString(uint8_t *str)
 	value = SearchSubString(str, CORE_NUMBER);
 	if (value != NULL) {
 		ConfigTrim(value);
-
 		 if (strlen((char *)value) >= MAX_PORT_SIZE) {
 			 return RETURN_ERROR;
 		 }
 		 strcpy(g_SaClusterControlCfg.coreNumber, (char *)value);
 		 return RETURN_OK;
-
 	}       
 	value = SearchSubString(str, QUEUE_AMOUNT);
 	if (value != NULL) {
 		ConfigTrim(value);
-
 		return TransformValueToInt(value, &g_SaClusterControlCfg.queueAmount);
 	}
 	value = SearchSubString(str, QUEUE_MAX_CAPACITY);
 	if (value != NULL) {
 		ConfigTrim(value);
-
 		return TransformValueToInt(value, &g_SaClusterControlCfg.queueMaxCapacity);
 	}
 	value = SearchSubString(str, MSGR_AMOUNT);
 	if (value != NULL) {
 		ConfigTrim(value);
-
 		return TransformValueToInt(value, &g_SaClusterControlCfg.msgrAmount);
 	}
 	value = SearchSubString(str, BIND_CORE);
 	if (value != NULL) {
 		ConfigTrim(value);
-
 		return TransformValueToInt(value, &g_SaClusterControlCfg.bindCore);
 	}
 	value = SearchSubString(str, BIND_QUEUE_CORE);
 	if (value != NULL) {
 		ConfigTrim(value);
-
 		return TransformValueToInt(value, &g_SaClusterControlCfg.bindQueueCore);
 	}
 
-
-
-
-
-
-
-
+	value = SearchSubString(str, WRITE_QOS);
+	if (value != NULL){
+		ConfigTrim(value);
+		return TransformValueToInt(value, &g_SaClusterControlCfg.writeOoS);
+	}
+	value = SearchSubString(str, GET_QUOTA_CYC);
+	if (value != NULL) {
+		ConfigTrim(value);
+		return TransformValueToInt(value, &g_SaClusterControlCfg.getQuotaCyc);
+	}
+	value = SearchSubString(str, GET_MESSENGER_THROTTLE);
+	if (value != NULL) {
+		ConfigTrim(value);
+		return TransformValueToInt(value,&g_SaClusterControlCfg.getMessengerThrottle);
+	}
 	return RETURN_OK;
 }
 
@@ -447,7 +438,6 @@ static int32_t ReadConfig(const char *configFile)
 
 	pcfgFile = fopen(configFile, "r");
 	if (pcfgFile == NULL) {
-
 		fprintf(stderr, "config failed to open file: %s.", configFile);
 		return RETURN_ERROR;
 	}
@@ -456,16 +446,12 @@ static int32_t ReadConfig(const char *configFile)
 		memset(acBuf, 0, CONFIG_BUFFSIZE);
 		ret = ConfigReadByLine(pcfgFile, acBuf, CONFIG_BUFFSIZE);
 		if (ret != RETURN_OK) {
-
-
 			ret = RETURN_OK;
 			break;
 		}
 
-
 		ret = AnalyzeSubString(acBuf);
 		if (ret != RETURN_OK) {
-
 			fprintf(stderr,"config get config para failed(%s) str(%s).\n", configFile, (char *)acBuf);
 			break;
 		}
@@ -484,12 +470,9 @@ int32_t OsaConfigRead::CacheClusterConfigInit(const char *filepath)
 
 	ret = ReadConfig(filepath);
 	if (ret != RETURN_OK) {
-
 		fprintf(stderr, "read cluster config failed, ret %d.\n",ret);
 		return ret;
 	}
-
-
 	return RETURN_OK;
 }
 
@@ -574,6 +557,19 @@ uint32_t OsaConfigRead::GetQueueMaxCapacity()
 {
 	return g_SaClusterControlCfg.queueMaxCapacity;
 }
+uint32_t OsaConfigRead::GetWriteQoS()
+{
+	return g_SaClusterControlCfg.writeOoS;
+}
+uint32_t OsaConfigRead::GetQuotCyc()
+{
+	return g_SaClusterControlCfg.getQuotaCyc;
+}
+uint32_t OsaConfigRead::GetMessengerThrottle()
+{
+	return g_SaClusterControlCfg.getMessengerThrottle;
+}
+
 
 static int32_t CopyCores(uint32_t *destCores, uint32_t maxCoreNum, uint32_t *srcCores, uint32_t maxSrcCoreNum)
 {

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Copyright c Huawei Technologies Co., Ltd. 2021-2021. All rights reserved.
+# Copyright © Huawei Technologies Co., Ltd. 2021-2021. All rights reserved.
 # Description: The script of building global_cache_adaptor
 set -ex
 set -o pipefail
@@ -27,6 +27,9 @@ main()
         if [ "$debug" = "DEBUG" ] ; then
                 echo "Build global_cache_adaptor DEBUG."
                 ${CMAKE} ${CMAKE_ROOT_DIR} -DCMAKE_SKIP_RPATH=true 
+        elif [ "$debug" = "ASAN" ] ; then
+                echo "Build global_cache_adaptor DEBUG with ASAN."
+                ${CMAKE} ${CMAKE_ROOT_DIR} -DCMAKE_SKIP_RPATH=true -DUSE_ASAN=True
         else
                 echo "Build global_cache_adaptor RELEASE."
                 ${CMAKE} ${CMAKE_ROOT_DIR} -DCMAKE_BUILD_TYPE=RELEASE -DCMAKE_SKIP_RPATH=true 

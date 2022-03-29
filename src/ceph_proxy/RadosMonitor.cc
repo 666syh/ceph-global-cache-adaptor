@@ -259,7 +259,7 @@ int32_t PoolUsageStat::ReportPoolNewAndDel(std::vector<uint32_t> &newPools, std:
     return 0;
 }
 
-int32_t PoolUsageStat::UpdatePoolList()
+int32_t PoolUsageStat::UpdatePoolList(void)
 {
     mutex.lock();
 

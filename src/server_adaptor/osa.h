@@ -30,6 +30,7 @@ void OSA_EncodeXattrGetxattr(const SaBatchKv *keyValue, int i, void *p);
 void OSA_EncodeXattrGetxattrs(const SaBatchKv *keyValue, int i, void *p);
 void OSA_EncodeGetOpstat(uint64_t psize, time_t ptime, int i, void *p);
 int OSA_ExecClass(SaOpContext *pctx, PREFETCH_FUNC prefetch);
+void OSA_EncodeListSnaps(const ObjSnaps *objSnaps, int i, void *p);
 
 #ifdef __cplusplus
 }

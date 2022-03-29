@@ -56,6 +56,10 @@ public:
     uint32_t GetBindQueueCore();
     uint32_t GetPerf();
     uint32_t GetQueueMaxCapacity();
+
+    uint32_t GetWriteQoS();
+    uint32_t GetQuotCyc();
+    uint32_t GetMessengerThrottle();
 };
 
 #endif
