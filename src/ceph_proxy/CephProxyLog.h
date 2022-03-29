@@ -17,33 +17,94 @@
 #ifndef __CEPH_PROXY_LOG_H__
 #define __CEPH_PROXY_LOG_H__
 
-#if defined SYS_LOG
-#include <syslog.h>
+#ifndef MY_PID
+#define MY_PID 882
+#endif
+
+#ifdef DPAX_LOG
+
+#include "dplog.h"
+#include "dpax_dbg_redef.h"
 
 #define ProxyDbgCrit(format, ...)                    \
 	do {						\
-		syslog(LOG_CRIT, "[PROXY]" format, ##__VA_ARGS__);	\
+		GCI_LOGGER_CRITICAL(MY_PID, "[PROXY]" format, ## __VA_ARGS__);	\
 	} while(0)
 
 #define ProxyDbgLogErr(format, ...)                    \
 	do {						\
-		syslog(LOG_ERR, "[PROXY]" format, ##__VA_ARGS__);	\
+		GCI_LOGGER_ERROR(MY_PID, "[PROXY]" format, ## __VA_ARGS__);	\
 	} while(0)
 
 #define ProxyDbgLogWarn(format, ...)                    \
 	do {						\
-		syslog(LOG_WARNING, "[PROXY]" format, ##__VA_ARGS__);	\
+		GCI_LOGGER_WARN(MY_PID, "[PROXY]" format, ## __VA_ARGS__);	\
 	} while(0)
 
 #define ProxyDbgLogInfo(format, ...)                    \
 	do {						\
-		 syslog(LOG_INFO, "[PROXY]" format, ##__VA_ARGS__);	\
+		GCI_LOGGER_INFO(MY_PID, "[PROXY]" format, ## __VA_ARGS__);	\
 	} while(0)
 
 #define ProxyDbgLogDebug(format, ...)                    \
 	do {						\
-		syslog(LOG_DEBUG, "[PROXY]" format, ##__VA_ARGS__);	\
+		GCI_LOGGER_DEBUG(MY_PID, "[PROXY]" format, ## __VA_ARGS__);	\
 	} while(0)
+
+#define ProxyDbgCritLimit(peroid, frequency, format, ...)                    \
+	do {						\
+		bool bLogErrorPrint = false;
+		PRINT_LIMIT_PERIOD(DBG_LOG_CRI, MY_PID, period, frequency, bLogErrorPrint);  \
+		if (bLogErrorPrint) {												\
+			GCI_LOGGER_CRITICAL(MY_PID, "[PROXY]" format, ## __VA_ARGS__);	\
+		}		\
+	} while(0)
+
+#define ProxyDbgLogErrLimit(peroid, frequency, format, ...)                    \
+	do {						\
+		bool bLogErrorPrint = false;
+		PRINT_LIMIT_PERIOD(DBG_LOG_ERROR, MY_PID, period, frequency, bLogErrorPrint);  \
+		if (bLogErrorPrint) {												\
+			GCI_LOGGER_ERR(MY_PID, "[PROXY]" format, ## __VA_ARGS__);	\
+		}		\
+	} while(0)
+
+#define ProxyDbgLogWarnLimit(peroid, frequency, format, ...)                    \
+	do {						\
+		bool bLogErrorPrint = false;
+		PRINT_LIMIT_PERIOD(DBG_LOG_WARNING, MY_PID, period, frequency, bLogErrorPrint);  \
+		if (bLogErrorPrint) {												\
+			GCI_LOGGER_WARN(MY_PID, "[PROXY]" format, ## __VA_ARGS__);	\
+		}		\
+	} while(0)
+
+#define ProxyDbgLogInfoLimit(peroid, frequency, format, ...)                    \
+	do {						\
+		bool bLogErrorPrint = false;
+		PRINT_LIMIT_PERIOD(DBG_LOG_INFO, MY_PID, period, frequency, bLogErrorPrint);  \
+		if (bLogErrorPrint) {												\
+			GCI_LOGGER_INFO(MY_PID, "[PROXY]" format, ##__VA_ARGS__);	\
+		}		\
+	} while(0)
+
+#define ProxyDbgLogDebugLimit(peroid, frequency, format, ...)                    \
+	do {						\
+		bool bLogErrorPrint = false;
+		PRINT_LIMIT_PERIOD(DBG_LOG_DEBUG, MY_PID, period, frequency, bLogErrorPrint);  \
+		if (bLogErrorPrint) {												\
+			GCI_LOGGER_DEBUG(MY_PID, "[PROXY]" format, ##__VA_ARGS__);	\
+		}		\
+	} while(0)
+
+#define ProxyDbgLogWarnLimit1(format, ...)                    \
+	do {						\
+		bool bLogErrorPrint = false;
+		PRINT_LIMIT_PERIOD(DBG_LOG_WARNING, MY_PID, 60 * HZ, 10, bLogErrorPrint);  \
+		if (bLogErrorPrint) {												\
+			GCI_LOGGER_WARN(MY_PID, "[PROXY]" format, ## __VA_ARGS__);	\
+		}		\
+	} while(0)
+
 #else
 
 #define ProxyDbgCrit(fmt, ...)                    \

@@ -1,6 +1,6 @@
 /* License:LGPL-2.1
  *
- * Copyright (c) 2021 Huawei Technologies Co., Ltf All rights reserved.
+ * Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
  *
  */
 #ifndef _CEPH_PROXY_H_
@@ -70,6 +70,7 @@ public:
 	CephProxyState GetState() const;
 	rados_ioctx_t GetIoCtx(const std::string& pool);
 	rados_ioctx_t GetIoCtx2(const int64_t poolId);
+	rados_ioctx_t GetIoCtxFromCeph(const int64_t poolId);
 	int64_t GetPoolIdByPoolName(const char *poolName);
 	int GetPoolNameByPoolId(int64_t poolId, char *buf, unsigned maxLen);
 	int64_t GetPoolIdByCtx(rados_ioctx_t ioctx);
@@ -77,6 +78,8 @@ public:
 	int GetPoolStat(rados_ioctx_t ctx, CephPoolStat *stat);
 	int GetMinAllocSize(uint32_t *minAllocSize, CEPH_BDEV_TYPE_E type);
 	int GetPoolUsedSizeAndMaxAvail(uint64_t &usedSize, uint64_t &maxAvail);
+	int RegisterPoolNewNotifyFn(NotifyPoolEventFn fn);
+	int RegisterPoolDelNotifyFn(NotifyPoolEventFn fn);
 };
 
 #endif

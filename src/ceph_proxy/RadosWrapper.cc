@@ -8,9 +8,10 @@
 #include "RadosWrapper.h"
 #include "CephProxyOp.h"
 #include "assert.h"
+#include "CephProxyFtds.h"
 #include "CephProxyLog.h"
 #include "ConfigRead.h"
-
+#include "CephProxy.h"
 #include <unistd.h>
 #include <stdio.h>
 #include <dirent.h>
@@ -25,6 +26,7 @@
 #include <list>
 #include <map>
 #include <set>
+#include <thread>
 
 using namespace std;
 using namespace librados;
@@ -268,7 +270,7 @@ int RadosCreateIoCtx2(rados_client_t client, const int64_t poolId,rados_ioctx_t 
 
 	int ret = rados->ioctx_create2(poolId, *ioctx);	
 	if ( ret < 0 ) {	
-		ProxyDbgLogErr("create ioctx by poolId failed: %d", ret);
+		ProxyDbgLogWarnLimit1("create ioctx by poolId failed: %d", ret);
 		return ret;
 	}
 
@@ -359,6 +361,8 @@ int RadosGetMinAllocSizeSSD(rados_client_t client, uint32_t *minAllocSize)
 
 int RadosGetClusterStat(rados_client_t client, CephClusterStat *stat)
 {	
+	uint64_t ts = 0;
+	PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_GETCLUSTER_STAT, ts);
 	librados::Rados *rados = reinterpret_cast<librados::Rados *>(client);
 	cluster_stat_t result;
 	int ret = rados->cluster_stat(result);
@@ -371,11 +375,14 @@ int RadosGetClusterStat(rados_client_t client, CephClusterStat *stat)
 	stat->kbAvail = result.kb_avail;
 	stat->kbUsed = result.kb_used;
 	stat->numObjects = result.num_objects;
+	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_GETCLUSTER_STAT, ts, ret);
 	return 0;
 }
 
 int RadosGetPoolStat(rados_client_t client, rados_ioctx_t ctx, CephPoolStat *stat)
 {
+	uint64_t ts = 0;
+	PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_GETPOOL_STAT, ts);
 	librados::IoCtx *ioctx = reinterpret_cast<librados::IoCtx *>(ctx);
 	librados::Rados *rados = reinterpret_cast<librados::Rados *>(client);
 
@@ -409,30 +416,36 @@ int RadosGetPoolStat(rados_client_t client, rados_ioctx_t ctx, CephPoolStat *sta
 	stat->compressedBytes = stats.compressed_bytes;
 	stat->compressedBytesAlloc = stats.compressed_bytes_alloc;
 
+	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_GETPOOL_STAT, ts, ret);
 	return 0;
 }
 
 
 rados_op_t RadosWriteOpInit(const string& pool, const string &oid)
 {
+	uint64_t ts = 0;
+	PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_WRITEOP_INIT, ts);
 	RadosObjectWriteOp *writeOp = new(std::nothrow)  RadosObjectWriteOp(pool,oid);	
 	if (writeOp == nullptr) {
 		ProxyDbgLogErr("Allocate WriteOp Failed.");
 		return nullptr;
 	}
 	rados_op_t op = reinterpret_cast<void *>(writeOp);
-
+	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_WRITEOP_INIT, ts, 0);
 	return op;
 }	
 
 rados_op_t RadosWriteOpInit2(const int64_t poolId, const string &oid)
 {
+	uint64_t ts = 0;
+	PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_WRITEOP_INIT, ts);
 	RadosObjectOperation *writeOp = new(std::nothrow) RadosObjectWriteOp(poolId,oid);	
 	if (writeOp == nullptr) {
 		ProxyDbgLogErr("Allocate WriteOp Failed.");
 		return nullptr;
 	}
 	rados_op_t op = reinterpret_cast<void *>(writeOp);
+	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_WRITEOP_INIT, ts, 0);
 	return op;
 }
 
@@ -514,16 +527,29 @@ void RadosWriteOpCreateObject(rados_op_t op, int exclusive, const char *category
 
 void RadosWriteOpWrite(rados_op_t op, const char *buffer, size_t len, uint64_t off)
 {
+	uint64_t ts = 0;
+	int32_t ret = 0;
+	PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_OPINIT_WRITE, ts);
 	RadosObjectWriteOp *writeOp = reinterpret_cast<RadosObjectWriteOp *>(op);
 	writeOp->bl.append(buffer, len);	
 	writeOp->op.write(off, writeOp->bl);
+	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_OPINIT_WRITE, ts, ret);
 }
 
-void RadosWriteOpWriteSGL(rados_op_t op, SGL_S *sgl, size_t len1, uint64_t off, char *buffer, size_t len2, int isRelease)
+void RadosWriteOpWriteSGL(rados_op_t op, SGL_S *sgl, size_t len1, uint64_t off, AlignBuffer *alignBuffer, int isRelease)
 {
+	uint64_t ts = 0;
+	int32_t ret = 0;
+	PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_OPINIT_WRITESGL, ts);
 	RadosObjectWriteOp *writeOp = reinterpret_cast<RadosObjectWriteOp *>(op);
 	uint32_t leftLen = len1;
 	uint32_t curSrcEntryIndex = 0;
+
+	if (alignBuffer != NULL &&
+		alignBuffer->prevAlignBuffer != NULL &&
+		alignBuffer->prevAlignLen != 0) {
+		writeOp->bl.append(alignBuffer->prevAlignBuffer, alignBuffer->prevAlignLen);
+	}
 	while(leftLen > 0){
 		size_t size = 0;
 		if (isRelease) {
@@ -539,23 +565,32 @@ void RadosWriteOpWriteSGL(rados_op_t op, SGL_S *sgl, size_t len1, uint64_t off, 
 			sgl = sgl->nextSgl;
 		}
 	}
-	
-	if (buffer != NULL && len2 != 0) {
-		writeOp->bl.append(buffer, len2);
+	if (alignBuffer != NULL &&
+		alignBuffer->backAlignBuffer != NULL &&
+		alignBuffer->backAlignLen != 0) {
+		writeOp->bl.append(alignBuffer->backAlignBuffer, alignBuffer->backAlignLen);
 	}
 
 	writeOp->op.write(off, writeOp->bl);
+	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_OPINIT_WRITESGL, ts, ret);
 }	
 
 void RadosWriteOpWriteFull(rados_op_t op, const char *buffer, size_t len)
 {
+	uint64_t ts = 0;
+	int32_t ret = 0;
+	PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_OPINIT_WRITE, ts);
 	RadosObjectWriteOp *writeOp = reinterpret_cast<RadosObjectWriteOp *>(op);
 	writeOp->bl.append(buffer, len);						
 	writeOp->op.write_full(writeOp->bl);
+	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_OPINIT_WRITE, ts, ret);
 }
 
 void RadosWriteOpWriteFullSGL(rados_op_t op, const SGL_S *sgl, size_t len, int isRelease)
 {
+	uint64_t ts = 0;
+	int32_t ret = 0;
+	PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_OPINIT_WRITESGL, ts);
 	RadosObjectWriteOp *writeOp = reinterpret_cast<RadosObjectWriteOp *>(op);
 	uint32_t leftLen = len;
 	uint32_t curSrcEtnryIndex = 0;
@@ -577,19 +612,27 @@ void RadosWriteOpWriteFullSGL(rados_op_t op, const SGL_S *sgl, size_t len, int i
 	}
 
 	writeOp->op.write_full(writeOp->bl);
+	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_OPINIT_WRITESGL, ts, ret);
 }	
 
 void RadosWriteOpWriteSame(rados_op_t op, const char *buffer,
 			size_t dataLen, size_t writeLen, uint64_t off)
 {
+	uint64_t ts = 0;
+	int32_t ret = 0;
+	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_OPINIT_WRITE, ts, ret);
 	RadosObjectWriteOp *writeOp = reinterpret_cast<RadosObjectWriteOp *>(op);
 	writeOp->bl.append(buffer, dataLen);
 	writeOp->op.writesame(off,writeLen, writeOp->bl);	
+	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_OPINIT_WRITE, ts, ret);
 }
 
 void RadosWriteOpWriteSameSGL(rados_op_t op, const SGL_S *s, size_t dataLen,
 			size_t writeLen, uint64_t off, int isRelease)
 {
+	uint64_t ts = 0;
+	int32_t ret = 0;
+	PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_OPINIT_WRITESGL, ts);
 	RadosObjectWriteOp *writeOp = reinterpret_cast<RadosObjectWriteOp *>(op);
 	uint32_t leftLen = dataLen;
 	uint32_t curSrcEntryIndex = 0;
@@ -610,18 +653,26 @@ void RadosWriteOpWriteSameSGL(rados_op_t op, const SGL_S *s, size_t dataLen,
     	}
 
 	writeOp->op.writesame(off,writeLen,  writeOp->bl);
+	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_OPINIT_WRITESGL, ts, ret);
 }
 
 void RadosWriteOpAppend(rados_op_t op, const char *buffer, size_t len)
 {
+	uint64_t ts = 0;
+	int32_t ret = 0;
+	PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_OPINIT_APPEND, ts);
 	RadosObjectWriteOp *writeOp = reinterpret_cast<RadosObjectWriteOp *>(op);
 
 	writeOp->bl.append(buffer,len);
 	writeOp->op.append(writeOp->bl);
+	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_OPINIT_APPEND, ts, ret);
 }
 
 void RadosWriteOpAppendSGL(rados_op_t op, const SGL_S *s, size_t len, int isRelease)
 {
+	uint64_t ts = 0;
+	int32_t ret = 0;
+	PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_OPINIT_APPENDSGL, ts);
 	RadosObjectWriteOp *writeOp = reinterpret_cast<RadosObjectWriteOp *>(op);
 	uint32_t leftLen = len;
 	uint32_t curSrcEntryIndex = 0;
@@ -643,24 +694,38 @@ void RadosWriteOpAppendSGL(rados_op_t op, const SGL_S *s, size_t len, int isRele
 	}
 
 	writeOp->op.append(writeOp->bl);
+	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_OPINIT_APPENDSGL, ts, ret);
 }
 
 void RadosWriteOpRemove(rados_op_t op)
 {
+	uint64_t ts = 0;
+	int32_t ret = 0;
+	PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_OPINIT_REMOVE, ts);
 	RadosObjectWriteOp *writeOp = reinterpret_cast<RadosObjectWriteOp *>(op);
 	writeOp->op.remove();
+	writeOp->isRemove = true;
+	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_OPINIT_REMOVE, ts, ret);
 }
 
 void RadosWriteOpTruncate(rados_op_t op, uint64_t off)	
 {
+	uint64_t ts = 0;
+	int32_t ret = 0;
+	PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_OPINIT_TRUNCATE, ts);
 	RadosObjectWriteOp *writeOp = reinterpret_cast<RadosObjectWriteOp *>(op);
 	writeOp->op.truncate(off);
+	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_OPINIT_TRUNCATE, ts, ret);
 }
 
 void RadosWriteOpZero(rados_op_t op, uint64_t off, uint64_t len)
 {
+	uint64_t ts = 0;
+	int32_t ret = 0;
+	PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_OPINIT_ZERO, ts);
 	RadosObjectWriteOp *writeOp = reinterpret_cast<RadosObjectWriteOp *>(op);
 	writeOp->op.zero(off, len);
+	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_OPINIT_ZERO, ts, ret);
 }
 
 void RadosWriteOpOmapSet(rados_op_t op, const char *const *keys,
@@ -926,28 +991,40 @@ void RadosReadOpOmapCmp(rados_op_t op, const char *key, uint8_t compOperator,
 
 void RadosReadOpStat(rados_op_t op, uint64_t *psize, time_t *pmtime, int *prval)
 {
+	uint64_t ts = 0;
+	int32_t ret = 0;
+	PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_OPINIT_READSTAT, ts);
     RadosObjectReadOp *readOp = reinterpret_cast<RadosObjectReadOp *>(op);
     readOp->op.stat(psize, pmtime, prval);
+	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_OPINIT_READSTAT, ts, ret);
 }
 
 void RadosReadOpRead(rados_op_t op, uint64_t offset, size_t len, char *buffer,
 			size_t *bytesRead, int *prval)
 {
+	uint64_t ts = 0;
+	int32_t ret = 0;
+	PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_OPINIT_READ, ts);
     RadosObjectReadOp *readOp = reinterpret_cast<RadosObjectReadOp *>(op);
     readOp->reqCtx.read.buffer = buffer;
     readOp->reqCtx.read.bytesRead = bytesRead;
 
     readOp->op.read(offset, len, &(readOp->results), prval);
+	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_OPINIT_READ, ts, ret);
 }
 
 void RadosReadOpReadSGL(rados_op_t op, uint64_t offset,size_t len, SGL_S *sgl, int *prval, int isRelease)
 {
+	uint64_t ts = 0;
+	int32_t ret = 0;
+	PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_OPINIT_READSGL, ts);
     RadosObjectReadOp *readOp = reinterpret_cast<RadosObjectReadOp *>(op);
     readOp->reqCtx.readSgl.sgl = sgl;
     readOp->reqCtx.readSgl.len = len;
     readOp->reqCtx.readSgl.buildType = isRelease;
 
     readOp->op.read(offset, len, &(readOp->results), prval);
+	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_OPINIT_READSGL, ts, ret);
 }
 
 void RadosReadOpCheckSum(rados_op_t op, proxy_checksum_type_t type,
@@ -1067,8 +1144,34 @@ void ReadCallback(rados_completion_t c, void *arg)
 		readOp->reqCtx.checksum.chunkSumLen);
     }
     
+	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_READ, readOp->ts, ret);
 
+	uint64_t ts = 0;
+	PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_RDCB, ts);
     readOp->callback(ret, readOp->cbArg);
+	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_RDCB, ts, ret);
+}
+
+static void PoolDeleteProc()
+{
+	ceph_proxy_t proxy = GetCephProxyInstance();
+	if (proxy == nullptr) {
+		ProxyDbgLogErr("get cephProxyInstance failed.");
+		return;
+	}
+
+	CephProxy *cephProxy = (CephProxy *)proxy;
+	int32_t ret = cephProxy->poolStatManager->UpdatePoolUsage();
+	if (ret != 0) {
+		ProxyDbgLogErr("UpdatePoolUsage failed.");
+		return;
+	}
+}
+
+static void TriggerPoolDelete(void)
+{
+	std::thread proc(PoolDeleteProc);
+	proc.detach();
 }
 
 void WriteCallback(rados_completion_t c, void *arg)
@@ -1076,19 +1179,40 @@ void WriteCallback(rados_completion_t c, void *arg)
 	RadosObjectWriteOp *writeOp = (RadosObjectWriteOp *)arg;
 
 	int ret = rados_aio_get_return_value(c);
+	uint64_t completeTs = writeOp->ts;
+	uint64_t ts = 0;
+	PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_WRCB, ts);
+
+	if (ret == 0) {
+		ProxyDbgLogDebug("write ret is %d", ret);
+	} else if (ret == -2) {
+#if 0
+		if (writeOp->isRemove == false) {
+			TriggerPoolDelete();
+		}
+#endif
+		ProxyDbgLogWarnLimit1("pool(object) is not exists");
+	} else {
+		ProxyDbgLogErr("write ret is %d", ret);
+	}
 	writeOp->callback(ret, writeOp->cbArg);
+	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_WRCB, ts, ret);
+	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_WRITE, completeTs, ret);
 }
 
 int RadosOperationAioOperate( rados_client_t client, rados_op_t op, rados_ioctx_t io, userCallback_t fn, void *cbArg)
 {
+	uint64_t opts = 0;
 	int ret = 0;
+	PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_OPERATE, opts);
 	librados::Rados *rados = reinterpret_cast<librados::Rados *>(client);
 	RadosObjectOperation *rop = reinterpret_cast<RadosObjectOperation *>(op);
 	librados::IoCtx *ctx = reinterpret_cast<librados::IoCtx*>(io);
 	switch (rop->opType) {
 	    case BATCH_READ_OP: {
 	        RadosObjectReadOp *readOp = dynamic_cast< RadosObjectReadOp *>(rop);
-		readOp->ts = 0;
+			readOp->ts = 0;
+			PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_READ, readOp->ts);
 	        readOp->callback = fn;
 	        readOp->cbArg = cbArg;
 
@@ -1102,7 +1226,8 @@ int RadosOperationAioOperate( rados_client_t client, rados_op_t op, rados_ioctx_
 	    break;
 	    case BATCH_WRITE_OP: {
 	        RadosObjectWriteOp *writeOp = dynamic_cast<RadosObjectWriteOp *>(rop);
-		writeOp->ts = 0;
+			writeOp->ts = 0;
+			PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_WRITE, writeOp->ts);
 	        writeOp->callback = fn;
 	        writeOp->cbArg = cbArg;
 	        librados::AioCompletion *writeCompletion = rados->aio_create_completion(writeOp, WriteCallback, NULL);
@@ -1115,8 +1240,11 @@ int RadosOperationAioOperate( rados_client_t client, rados_op_t op, rados_ioctx_
 	    }
 	    break;
 	    default:
+			ProxyDbgLogErr("unknown op: %u", rop->opType);
+			ret = -EINVAL;
 	    break;
 	}
+	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_OPERATE, opts, ret);
 	return ret;
 }
 	

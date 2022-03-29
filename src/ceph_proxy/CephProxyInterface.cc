@@ -39,6 +39,11 @@ void CephProxyShutdown(ceph_proxy_t proxy)
     proxy = nullptr;
 }
 
+ceph_proxy_t GetCephProxyInstance(void)
+{
+	return (ceph_proxy_t)(CephProxy::instance);
+}
+
 int32_t CephProxyQueueOp(ceph_proxy_t proxy, ceph_proxy_op_t op, completion_t c)
 {
     CephProxy *cephProxy = reinterpret_cast<CephProxy*>(proxy);
@@ -55,6 +60,17 @@ rados_ioctx_t CephProxyGetIoCtx2(ceph_proxy_t proxy, const int64_t poolId)
 {
 	CephProxy *cephProxy = reinterpret_cast<CephProxy *>(proxy);
 	return cephProxy->GetIoCtx2(poolId);
+}
+
+rados_ioctx_t CephProxyGetIoCtxFromCeph(ceph_proxy_t proxy, const int64_t poolId)
+{
+	CephProxy *cephProxy = reinterpret_cast<CephProxy *>(proxy);
+	return cephProxy->GetIoCtxFromCeph(poolId);
+}
+
+void CephProxyReleaseIoCtx(rados_ioctx_t ioctx)
+{
+	return RadosReleaseIoCtx(ioctx);
 }
 
 int64_t CephProxyGetPoolIdByPoolName(ceph_proxy_t proxy, const char *poolName)
@@ -103,6 +119,20 @@ int CephProxyGetUsedSizeAndMaxAvail(ceph_proxy_t proxy, uint64_t &usedSize, uint
 {
 	CephProxy *cephProxy = reinterpret_cast<CephProxy *>(proxy);
 	return cephProxy->GetPoolUsedSizeAndMaxAvail(usedSize, maxAvail);
+}
+
+int CephProxyRegisterPoolDelNotifyFn(NotifyPoolEventFn fn)
+{
+	ceph_proxy_t proxy = GetCephProxyInstance();
+	CephProxy *cephProxy = reinterpret_cast<CephProxy *>(proxy);
+	return cephProxy->RegisterPoolDelNotifyFn(fn);
+}
+
+int CephProxyRegisterPoolNewNotifyFn(NotifyPoolEventFn fn)
+{
+	ceph_proxy_t proxy = GetCephProxyInstance();
+	CephProxy *cephProxy = reinterpret_cast<CephProxy *>(proxy);
+	return cephProxy->RegisterPoolNewNotifyFn(fn);
 }
 
 int CephProxyWriteOpInit2(ceph_proxy_op_t *op, const int64_t poolId, const char* oid)
@@ -174,9 +204,9 @@ void CephProxyWriteOpWrite(ceph_proxy_op_t op, const char *buffer, size_t len, u
 	RadosWriteOpWrite(op, buffer, len, off);
 }
 
-void CephProxyWriteOpWriteSGL(ceph_proxy_op_t op, SGL_S *s, size_t len1, uint64_t off, char *buffer, size_t len2, int isRelease)
+void CephProxyWriteOpWriteSGL(ceph_proxy_op_t op, SGL_S *s, size_t len1, uint64_t off, AlignBuffer *alignBuffer, int isRelease)
 {
-	RadosWriteOpWriteSGL(op, s, len1, off, buffer, len2, isRelease);
+	RadosWriteOpWriteSGL(op, s, len1, off, alignBuffer, isRelease);
 }
 
 void CephProxyWriteOpWriteFull(ceph_proxy_op_t op, const char *buffer, size_t len)

@@ -148,6 +148,13 @@ typedef enum {
 } CEPH_BDEV_TYPE_E;
 
 typedef struct {
+    char *prevAlignBuffer;
+    size_t prevAlignLen;
+    char *backAlignBuffer;
+    size_t backAlignLen;
+} AlignBuffer;
+
+typedef struct {
 
     uint64_t numBytes;
 
@@ -194,6 +201,8 @@ typedef struct {
     uint64_t numObjects;
 } CephClusterStat;
 
+typedef int32_t (*NotifyPoolEventFn)(uint32_t poolId);
+
 typedef void *completion_t;
 typedef void (*CallBack_t)(int ret, void *arg);
 typedef void *ceph_proxy_op_t;
@@ -229,6 +238,13 @@ void CephProxyShutdown(ceph_proxy_t proxy);
 
 
 
+ceph_proxy_t GetCephProxyInstance(void);
+
+
+
+
+
+
 
 rados_ioctx_t CephProxyGetIoCtx(ceph_proxy_t proxy, const char *poolname);
  
@@ -239,6 +255,22 @@ rados_ioctx_t CephProxyGetIoCtx(ceph_proxy_t proxy, const char *poolname);
 
 
 rados_ioctx_t CephProxyGetIoCtx2(ceph_proxy_t proxy, const int64_t poolId);
+
+
+
+
+
+
+
+rados_ioctx_t CephProxyGetIoCtxFromCeph(ceph_proxy_t proxy, const int64_t poolId);
+
+
+
+
+
+
+
+void CephProxyReleaseIoCtx(rados_ioctx_t ioctx);
 
 
 
@@ -430,7 +462,7 @@ void CephProxyWriteOpWrite(ceph_proxy_op_t op, const char *buffer, size_t len, u
 
 
 
-void CephProxyWriteOpWriteSGL(ceph_proxy_op_t op, SGL_S *sgl, size_t len1, uint64_t off, char *buffer, size_t len2, int isRelease);
+void CephProxyWriteOpWriteSGL(ceph_proxy_op_t op, SGL_S *sgl, size_t len1, uint64_t off, AlignBuffer *alignBuffer, int isRelease);
 
 
 
@@ -709,30 +741,14 @@ void CephProxyCompletionDestroy(completion_t c);
 
 
 
+int CephProxyRegisterPoolDelNotifyFn(NotifyPoolEventFn fn);
 
 
 
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+int CephProxyRegisterPoolNewNotifyFn(NotifyPoolEventFn fn);
 
 #ifdef __cplusplus
 }

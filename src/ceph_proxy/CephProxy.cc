@@ -7,6 +7,7 @@
 #include "CephProxy.h"
 #include "PoolContext.h"
 #include "RadosWrapper.h"
+#include "CephProxyFtds.h"
 #include "CephProxyOp.h"
 #include "RadosWorker.h"
 #include "ConfigRead.h"
@@ -123,38 +124,65 @@ void CephProxy::Shutdown() {
 
 int32_t CephProxy::Enqueue(ceph_proxy_op_t op, completion_t c)
 {
+    uint64_t ts = 0;
     int32_t ret = 0;
+    PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_QUEUE, ts);
     ret = worker->Queue(op, c);
+    PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_QUEUE, ts, ret);
     return ret;
 }
 
 rados_ioctx_t CephProxy::GetIoCtx(const std::string &pool)
 {
+    uint64_t ts = 0;
+    PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_GETIOCTX, ts);
     rados_ioctx_t ioctx = ptable.GetIoCtx(pool);
     if (ioctx == nullptr) {
         int ret = RadosCreateIoCtx(radosClient, pool ,&ioctx);
         if (ret != 0) {
-	    ProxyDbgLogErr("Create IoCtx failed: %d", ret);
-	    return nullptr;
+            ProxyDbgLogWarnLimit1("Create IoCtx(%s) failed: %d", pool.c_str(), ret);
+            PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_GETIOCTX, ts, ret);
+            return nullptr;
 	}
 
         ptable.Insert(pool, ioctx);
     }
+    PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_GETIOCTX, ts, 0);
     return ioctx;
 }
 
 rados_ioctx_t CephProxy::GetIoCtx2(const int64_t poolId)
 {
+    uint64_t ts = 0;
+    PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_GETIOCTX, ts);
     rados_ioctx_t ioctx = ptable.GetIoCtx(poolId);
     if (ioctx == nullptr) {
         int ret = RadosCreateIoCtx2(radosClient, poolId, &ioctx);
         if (ret != 0) {
-            ProxyDbgLogErr("Create IoCtx failed: %d", ret);
-	    return nullptr;
+            ProxyDbgLogWarnLimit1("Create IoCtx(%ld) failed: %d", poolId, ret);
+            PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_GETIOCTX, ts, ret);
+            return nullptr;
         }
 
         ptable.Insert(poolId, ioctx);
     }
+    PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_GETIOCTX, ts, 0);
+    return ioctx;
+}
+
+rados_ioctx_t CephProxy::GetIoCtxFromCeph(const int64_t poolId)
+{
+    uint64_t ts = 0;
+    PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_GETIOCTX, ts);
+    rados_ioctx_t ioctx = nullptr;
+    int ret = RadosCreateIoCtx2(radosClient, poolId, &ioctx);
+    if (ret != 0) {
+        ProxyDbgLogWarnLimit1("Create IoCtx(%ld) failed: %d", poolId, ret);
+        PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_GETIOCTX, ts, ret);
+        return nullptr;
+    }
+
+    PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_GETIOCTX, ts, 0);
     return ioctx;
 }
 
@@ -224,14 +252,34 @@ int CephProxy::GetPoolUsedSizeAndMaxAvail(uint64_t &usedSize, uint64_t &maxAvail
     return poolStatManager->GetPoolAllUsedAndAvail(usedSize, maxAvail);
 }
 
+int CephProxy::RegisterPoolDelNotifyFn(NotifyPoolEventFn fn)
+{
+    if (poolStatManager == nullptr) {
+        ProxyDbgLogErr("proxy is not working.");
+	    return -1;
+    }
+
+    return poolStatManager->RegisterPoolDelNotifyFn(fn);
+}
+
+int CephProxy::RegisterPoolNewNotifyFn(NotifyPoolEventFn fn)
+{
+    if (poolStatManager == nullptr) {
+        ProxyDbgLogErr("proxy is not working");
+	    return -1;
+    }
+
+    return poolStatManager->RegisterPoolNewNotifyFn(fn);
+}
+
 int CephProxy::GetMinAllocSize(uint32_t *minAllocSize, CEPH_BDEV_TYPE_E type)
 {
      switch(type) {
-	case CEPH_BDEV_HDD:
+	    case CEPH_BDEV_HDD:
      	    return RadosGetMinAllocSizeHDD(radosClient,minAllocSize);
-	case CEPH_BDEV_SSD:
+	    case CEPH_BDEV_SSD:
      	    return RadosGetMinAllocSizeSSD(radosClient,minAllocSize);
-	default:
+	    default:
      	    return RadosGetMinAllocSizeHDD(radosClient,minAllocSize);
     }
 
