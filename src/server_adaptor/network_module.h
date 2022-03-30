@@ -12,15 +12,36 @@
 #include <thread>
 #include <string>
 #include <vector>
+#include <chrono>
 #include <messages/MOSDOp.h>
 #include <messages/MOSDOpReply.h>
 
 #include "sa_server_dispatcher.h"
-#include "sa_client_dispatcher.h"
 #include "sa_def.h"
 #include "client_op_queue.h" 
 #include "msg_perf_record.h"
 #include "sa_export.h"
+
+struct QosParam {
+    uint32_t limitWrite { 0 };
+    uint32_t getQuotaCycle { 200 };
+    uint32_t enableThrottle { 0 };
+};
+
+typedef struct CloneInfo {
+    uint32_t cloneid;
+    uint32_t objSize;
+    uint32_t snapNum;
+    uint32_t *snaps;
+    uint32_t overlapNum;
+    uint32_t (*overlaps)[2];
+} CloneInfo;
+
+typedef struct ObjSnaps {
+    uint32_t seq;
+    uint32_t cloneInfoNum;
+    CloneInfo* cloneInfos;
+} ObjSnaps;
 
 class NetworkModule {
     SaExport *sa {nullptr};
@@ -36,7 +57,7 @@ class NetworkModule {
 
     entity_addr_t recvBindAddr;
     Messenger *clientMessenger { nullptr };
-    SaClientDispatcher *clientDispatcher { nullptr };
+
     entity_addr_t sendBindAddr;
 
     std::string recvAddr { "localhost" };
@@ -63,16 +84,22 @@ class NetworkModule {
 
     MsgPerfRecord *msgPerf { nullptr};
 
+    std::vector<Throttle *> vecMsgThrottler;
+    std::vector<Throttle *> vecByteThrottler;
+
     std::vector<std::string> vecPorts;
     std::vector<Messenger *> vecSvrMessenger;
     std::vector<SaServerDispatcher *> vecDispatcher;
 
     int *bindSuccess { nullptr };
 
-
-
-
-
+    QosParam qosParam;
+    std::chrono::high_resolution_clock::time_point cycleBegin { };
+    uint64_t periodBW { 0 };
+    uint64_t wcacheBW { ULLONG_MAX };
+    SaWcacheQosInfo qosInfo { 0 };
+    std::mutex limitWriteMtx;
+    std::condition_variable limitWriteCond {};
 
 
 
@@ -93,6 +120,10 @@ class NetworkModule {
 
     void BindCore(uint64_t tid, uint32_t seq, bool isWorker = true);
 
+    int ProcessOpReq(std::queue<MOSDOp *> &dealQueue, std::queue<uint64_t> &periodTs, SaOpReq *opreq);
+
+    bool ContainWriteOp(const MOSDOp &op);
+
 public:
     NetworkModule() = delete;
 
@@ -103,6 +134,7 @@ public:
 	    bindMsgrCore = bind;
 	    bindSaCore = bindsa;
 	    sa = &p;
+        cycleBegin = std::chrono::high_resolution_clock::now();
     }
 
     ~NetworkModule()
@@ -122,9 +154,6 @@ public:
 	}
         if (clientMessenger) {
             delete clientMessenger;
-        }
-        if (clientDispatcher) {
-            delete clientDispatcher;
         }
         if (msgPerf) {
             delete msgPerf;
@@ -164,16 +193,6 @@ public:
 
     int ThreadFuncBodyServer();
 
-
-
-
-
-
-
-
-
-    int ThreadFuncBodyClient();
-
     void CreateWorkThread(uint32_t queueNum, uint32_t portAmout, uint32_t qmaxcapacity);
     void StopThread();
     void OpHandlerThread(int threadNum, int coreId);
@@ -183,7 +202,8 @@ public:
     }
     uint32_t EnqueueClientop(MOSDOp *opReq);
 
-    void TestSimulateClient(bool ping, bool mosdop);
+    void SetQosParam(const QosParam &p);
+    void LimitWrite(const MOSDOp &op);
 };
 
 void FinishCacheOps(void *op, int32_t r);
@@ -198,4 +218,5 @@ void SetOpResult(int i, int32_t ret, MOSDOp *op);
 void EncodeXattrGetXattr(const SaBatchKv *keyValue, int i, MOSDOp *mosdop);
 void EncodeXattrGetXattrs(const SaBatchKv *keyValue, int i, MOSDOp *mosdop);
 void EncodeGetOpstat(uint64_t psize, time_t ptime, int i, MOSDOp *mosdop);
+void EncodeListSnaps(const ObjSnaps *objSnaps, int i, MOSDOp *mosdop);
 #endif

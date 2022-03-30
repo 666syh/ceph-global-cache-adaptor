@@ -1,7 +1,8 @@
-diff -Naru ceph-14.2.8/CMakeLists.txt ceph-14.2.8tls/CMakeLists.txt
---- ceph-14.2.8/CMakeLists.txt	2020-03-03 01:49:20.000000000 +0800
-+++ ceph-14.2.8tls/CMakeLists.txt	2021-12-18 17:48:43.608746610 +0800
-@@ -3,6 +3,8 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index f068082..567ea3f 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -3,6 +3,8 @@ cmake_minimum_required(VERSION 3.5.1)
  project(ceph CXX C ASM)
  set(VERSION 14.2.8)
  
@@ -10,10 +11,11 @@ diff -Naru ceph-14.2.8/CMakeLists.txt ceph-14.2.8tls/CMakeLists.txt
  if(POLICY CMP0028)
    cmake_policy(SET CMP0028 NEW)
  endif()
-diff -Naru ceph-14.2.8/src/CMakeLists.txt ceph-14.2.8tls/src/CMakeLists.txt
---- ceph-14.2.8/src/CMakeLists.txt	2020-03-03 01:49:20.000000000 +0800
-+++ ceph-14.2.8tls/src/CMakeLists.txt	2021-12-18 17:48:43.608746610 +0800
-@@ -394,10 +394,10 @@
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 28ec983..40090cb 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -394,10 +394,10 @@ if(WITH_DPDK)
  endif()
  
  add_library(common STATIC ${ceph_common_objs})
@@ -26,74 +28,10 @@ diff -Naru ceph-14.2.8/src/CMakeLists.txt ceph-14.2.8tls/src/CMakeLists.txt
  # appease dpkg-shlibdeps
  set_target_properties(ceph-common PROPERTIES
    SOVERSION 0
-diff -Naru ceph-14.2.8/src/msg/async/cert_ceph.h ceph-14.2.8tls/src/msg/async/cert_ceph.h
---- ceph-14.2.8/src/msg/async/cert_ceph.h	1970-01-01 08:00:00.000000000 +0800
-+++ ceph-14.2.8tls/src/msg/async/cert_ceph.h	2021-12-24 16:36:09.504746610 +0800
-@@ -0,0 +1,61 @@
-+/*
-+Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
-+
-+Licensed under the Apache License, Version 2.0 (the "License");
-+you may not use this file except in compliance with the License.
-+You may obtain a copy of the License at
-+
-+	http://www.apache.org/licenses/LICENSE-2.0
-+
-+Unless required by applicable law or agreed to in writing, software
-+distributed under the License is distributed on an "AS IS" BASIS,
-+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-+See the License for the specific language governing permissions and
-+limitations under the License.
-+*/
-+ 
-+#ifndef _CERT_CEPH_H_
-+#define _CERT_CEPH_H_
-+
-+#include <openssl/ssl.h>
-+#include <openssl/err.h>
-+#include <openssl/x509.h>
-+#include <openssl/pem.h>
-+#include <openssl/evp.h>
-+
-+#ifdef __cplusplus
-+extern "C" {
-+#endif
-+
-+#define MAX_CIPHER_NAME 50
-+
-+typedef struct certParam {
-+    int8_t tlsStatus;
-+    int32_t tlsVersion;
-+    char tlsCipherList[MAX_CIPHER_NAME];
-+    char caFilePath[PATH_MAX];
-+    char keypassFilePath[PATH_MAX];
-+    char agentCertFilePath[PATH_MAX];
-+    char publicKeyFilePath[PATH_MAX];
-+    char privateKeyFilePath[PATH_MAX];
-+    char revokeCrlFilePath[PATH_MAX];
-+    char kmcPrimaryKsfPath[PATH_MAX];
-+    char kmcStandbyKsfPath[PATH_MAX];
-+    char *keypass;
-+    int32_t maxConnect;
-+    int32_t portIdStart;
-+    int32_t portIdEnd;
-+    int32_t certCheckPeriodDays;
-+    int32_t certCheckWarnningDays;
-+} certParam_t;
-+
-+int32_t certParamInit(certParam_t *param);
-+int32_t sslctxInit(certParam_t *param, SSL_CTX **ctx);
-+
-+#define MAX_CONNECT_COUNT 40960
-+
-+#ifdef __cplusplus
-+}
-+#endif
-+
-+#endif
-diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/PosixStack.cc
---- ceph-14.2.8/src/msg/async/PosixStack.cc	2020-03-03 01:49:20.000000000 +0800
-+++ ceph-14.2.8tls/src/msg/async/PosixStack.cc	2021-12-18 23:23:31.740746610 +0800
+diff --git a/src/msg/async/PosixStack.cc b/src/msg/async/PosixStack.cc
+index e9c8d40..0dc8607 100644
+--- a/src/msg/async/PosixStack.cc
++++ b/src/msg/async/PosixStack.cc
 @@ -13,7 +13,6 @@
   * Foundation.  See file COPYING.
   *
@@ -366,7 +304,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
  class PosixConnectedSocketImpl final : public ConnectedSocketImpl {
    NetHandler &handler;
    int _fd;
-@@ -45,7 +297,8 @@
+@@ -45,7 +297,8 @@ class PosixConnectedSocketImpl final : public ConnectedSocketImpl {
  
   public:
    explicit PosixConnectedSocketImpl(NetHandler &h, const entity_addr_t &sa, int f, bool connected)
@@ -376,7 +314,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
  
    int is_connected() override {
      if (connected)
-@@ -68,13 +321,12 @@
+@@ -68,13 +321,12 @@ class PosixConnectedSocketImpl final : public ConnectedSocketImpl {
  
    ssize_t read(char *buf, size_t len) override {
      ssize_t r = ::read(_fd, buf, len);
@@ -392,7 +330,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
    static ssize_t do_sendmsg(int fd, struct msghdr &msg, unsigned len, bool more)
    {
      size_t sent = 0;
-@@ -82,6 +334,7 @@
+@@ -82,6 +334,7 @@ class PosixConnectedSocketImpl final : public ConnectedSocketImpl {
        MSGR_SIGPIPE_STOPPER;
        ssize_t r;
        r = ::sendmsg(fd, &msg, MSG_NOSIGNAL | (more ? MSG_MORE : 0));
@@ -400,7 +338,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
        if (r < 0) {
          if (errno == EINTR) {
            continue;
-@@ -169,16 +422,22 @@
+@@ -169,16 +422,22 @@ class PosixConnectedSocketImpl final : public ConnectedSocketImpl {
    friend class PosixNetworkStack;
  };
  
@@ -426,7 +364,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
    void abort_accept() override {
      ::close(_fd);
    }
-@@ -188,23 +447,50 @@
+@@ -188,23 +447,50 @@ class PosixServerSocketImpl : public ServerSocketImpl {
  };
  
  int PosixServerSocketImpl::accept(ConnectedSocket *sock, const SocketOptions &opt, entity_addr_t *out, Worker *w) {
@@ -477,7 +415,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
      return -errno;
    }
  
-@@ -212,17 +498,51 @@
+@@ -212,17 +498,51 @@ int PosixServerSocketImpl::accept(ConnectedSocket *sock, const SocketOptions &op
  
    out->set_type(addr_type);
    out->set_sockaddr((sockaddr*)&ss);
@@ -535,7 +473,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
  int PosixWorker::listen(entity_addr_t &sa,
  			unsigned addr_slot,
  			const SocketOptions &opt,
-@@ -232,7 +552,6 @@
+@@ -232,7 +552,6 @@ int PosixWorker::listen(entity_addr_t &sa,
    if (listen_sd < 0) {
      return -errno;
    }
@@ -543,7 +481,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
    int r = net.set_nonblock(listen_sd);
    if (r < 0) {
      ::close(listen_sd);
-@@ -248,7 +567,7 @@
+@@ -248,7 +567,7 @@ int PosixWorker::listen(entity_addr_t &sa,
    r = ::bind(listen_sd, sa.get_sockaddr(), sa.get_sockaddr_len());
    if (r < 0) {
      r = -errno;
@@ -552,7 +490,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
                     << ": " << cpp_strerror(r) << dendl;
      ::close(listen_sd);
      return r;
-@@ -264,13 +583,12 @@
+@@ -264,13 +583,12 @@ int PosixWorker::listen(entity_addr_t &sa,
  
    *sock = ServerSocket(
            std::unique_ptr<PosixServerSocketImpl>(
@@ -567,7 +505,7 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
    if (opts.nonblock) {
      sd = net.nonblock_connect(addr, opts.connect_bind_addr);
    } else {
-@@ -282,8 +600,32 @@
+@@ -282,8 +600,32 @@ int PosixWorker::connect(const entity_addr_t &addr, const SocketOptions &opts, C
    }
  
    net.set_priority(sd, opts.priority, addr.get_family());
@@ -601,9 +539,10 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.cc ceph-14.2.8tls/src/msg/async/
    return 0;
  }
  
-diff -Naru ceph-14.2.8/src/msg/async/PosixStack.h ceph-14.2.8tls/src/msg/async/PosixStack.h
---- ceph-14.2.8/src/msg/async/PosixStack.h	2020-03-03 01:49:20.000000000 +0800
-+++ ceph-14.2.8tls/src/msg/async/PosixStack.h	2021-12-18 17:49:45.036746610 +0800
+diff --git a/src/msg/async/PosixStack.h b/src/msg/async/PosixStack.h
+index f1aaccd..0a240b2 100644
+--- a/src/msg/async/PosixStack.h
++++ b/src/msg/async/PosixStack.h
 @@ -18,18 +18,31 @@
  #define CEPH_MSG_ASYNC_POSIXSTACK_H
  
@@ -638,9 +577,10 @@ diff -Naru ceph-14.2.8/src/msg/async/PosixStack.h ceph-14.2.8tls/src/msg/async/P
    int listen(entity_addr_t &sa,
  	     unsigned addr_slot,
  	     const SocketOptions &opt,
-diff -Naru ceph-14.2.8/src/msg/async/Stack.cc ceph-14.2.8tls/src/msg/async/Stack.cc
---- ceph-14.2.8/src/msg/async/Stack.cc	2020-03-03 01:49:20.000000000 +0800
-+++ ceph-14.2.8tls/src/msg/async/Stack.cc	2021-12-18 17:49:50.400746610 +0800
+diff --git a/src/msg/async/Stack.cc b/src/msg/async/Stack.cc
+index 8976c3c..e071ca7 100644
+--- a/src/msg/async/Stack.cc
++++ b/src/msg/async/Stack.cc
 @@ -29,11 +29,14 @@
  
  #include "common/dout.h"
@@ -656,7 +596,7 @@ diff -Naru ceph-14.2.8/src/msg/async/Stack.cc ceph-14.2.8tls/src/msg/async/Stack
  std::function<void ()> NetworkStack::add_thread(unsigned i)
  {
    Worker *w = workers[i];
-@@ -82,10 +85,10 @@
+@@ -82,10 +85,10 @@ std::shared_ptr<NetworkStack> NetworkStack::create(CephContext *c, const string
    return nullptr;
  }
  
@@ -669,7 +609,7 @@ diff -Naru ceph-14.2.8/src/msg/async/Stack.cc ceph-14.2.8tls/src/msg/async/Stack
  #ifdef HAVE_RDMA
    else if (type == "rdma")
      return new RDMAWorker(c, i);
-@@ -105,6 +108,21 @@
+@@ -105,6 +108,21 @@ NetworkStack::NetworkStack(CephContext *c, const string &t): type(t), started(fa
  {
    ceph_assert(cct->_conf->ms_async_op_threads > 0);
  
@@ -691,7 +631,7 @@ diff -Naru ceph-14.2.8/src/msg/async/Stack.cc ceph-14.2.8tls/src/msg/async/Stack
    const int InitEventNumber = 5000;
    num_workers = cct->_conf->ms_async_op_threads;
    if (num_workers >= EventCenter::MAX_EVENTCENTER) {
-@@ -116,7 +134,7 @@
+@@ -116,7 +134,7 @@ NetworkStack::NetworkStack(CephContext *c, const string &t): type(t), started(fa
    }
  
    for (unsigned i = 0; i < num_workers; ++i) {
@@ -700,9 +640,10 @@ diff -Naru ceph-14.2.8/src/msg/async/Stack.cc ceph-14.2.8tls/src/msg/async/Stack
      w->center.init(InitEventNumber, i, type);
      workers.push_back(w);
    }
-diff -Naru ceph-14.2.8/src/msg/async/Stack.h ceph-14.2.8tls/src/msg/async/Stack.h
---- ceph-14.2.8/src/msg/async/Stack.h	2020-03-03 01:49:20.000000000 +0800
-+++ ceph-14.2.8tls/src/msg/async/Stack.h	2021-12-18 17:49:50.600746610 +0800
+diff --git a/src/msg/async/Stack.h b/src/msg/async/Stack.h
+index a093dad..45415b1 100644
+--- a/src/msg/async/Stack.h
++++ b/src/msg/async/Stack.h
 @@ -21,6 +21,7 @@
  #include "common/perf_counters.h"
  #include "msg/msg_types.h"
@@ -711,7 +652,7 @@ diff -Naru ceph-14.2.8/src/msg/async/Stack.h ceph-14.2.8tls/src/msg/async/Stack.
  
  class Worker;
  class ConnectedSocketImpl {
-@@ -308,21 +309,27 @@
+@@ -308,21 +309,27 @@ class NetworkStack {
   protected:
    CephContext *cct;
    vector<Worker*> workers;
@@ -741,4 +682,69 @@ diff -Naru ceph-14.2.8/src/msg/async/Stack.h ceph-14.2.8tls/src/msg/async/Stack.
    // backend need to override this method if supports zero copy read
    virtual bool support_zero_copy_read() const { return false; }
    // backend need to override this method if backend doesn't support shared
-
+diff --git a/src/msg/async/cert_ceph.h b/src/msg/async/cert_ceph.h
+new file mode 100644
+index 0000000..07ddbd3
+--- /dev/null
++++ b/src/msg/async/cert_ceph.h
+@@ -0,0 +1,60 @@
++/*
++Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++	http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++ 
++#ifndef _CERT_CEPH_H_
++#define _CERT_CEPH_H_
++
++#include <openssl/ssl.h>
++#include <openssl/err.h>
++#include <openssl/x509.h>
++#include <openssl/pem.h>
++#include <openssl/evp.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#define MAX_CIPHER_NAME 50
++
++typedef struct certParam {
++    int8_t tlsStatus;
++    int32_t tlsVersion;
++    char tlsCipherList[MAX_CIPHER_NAME];
++    char caFilePath[PATH_MAX];
++    char keypassFilePath[PATH_MAX];
++    char agentCertFilePath[PATH_MAX];
++    char publicKeyFilePath[PATH_MAX];
++    char privateKeyFilePath[PATH_MAX];
++    char revokeCrlFilePath[PATH_MAX];
++    char kmcPrimaryKsfPath[PATH_MAX];
++    char kmcStandbyKsfPath[PATH_MAX];
++    int32_t maxConnect;
++    int32_t portIdStart;
++    int32_t portIdEnd;
++    int32_t certCheckPeriodDays;
++    int32_t certCheckWarnningDays;
++} certParam_t;
++
++int32_t certParamInit(certParam_t *param);
++int32_t sslctxInit(certParam_t *param, SSL_CTX **ctx);
++
++#define MAX_CONNECT_COUNT 40960
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif

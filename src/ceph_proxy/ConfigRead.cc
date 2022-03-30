@@ -55,10 +55,10 @@ static const char *RADOS_OSD_OP_TIMEOUT	= "rados_osd_op_timeout";
 #endif
 
 typedef struct {
-    char zkServerList[ZK_SERVER_LIST_STR_LEN];
-    char cephConfPath[MAX_PATH_LEN];
-    char logOutPath[MAX_PATH_LEN];
-    char coreIds[MAX_CORE_NUMBER];
+    char zkServerList[ZK_SERVER_LIST_STR_LEN + 1];
+    char cephConfPath[MAX_PATH_LEN + 1];
+    char logOutPath[MAX_PATH_LEN + 1];
+    char coreIds[MAX_CORE_NUMBER + 1];
 
     uint64_t workerNum;
     uint64_t msgrAmount;
@@ -237,7 +237,10 @@ static int32_t AnalyzeSubString(uint8_t *str)
     if (value != NULL) {
 	ConfigTrim(value);
 	ProxyDbgLogInfo("read config: %s, value %s.", ZK_SERVER_LIST, value);
-        strcpy(g_ProxyCfg.zkServerList, (char *)value);
+    if(strncpy(g_ProxyCfg.zkServerList, (char *)value, ZK_SERVER_LIST_STR_LEN) == NULL) {
+        ProxyDbgLogErr("strncpy failed.");
+        return RETURN_ERROR;
+    }
 
 	return RETURN_OK;
     }
@@ -246,7 +249,10 @@ static int32_t AnalyzeSubString(uint8_t *str)
     if (value != NULL) {
 	ConfigTrim(value);
 	ProxyDbgLogInfo("read config: %s, value: %s", CEPH_CONF_PATH, value);
-        strcpy(g_ProxyCfg.cephConfPath, (char *)value);
+    if(strncpy(g_ProxyCfg.cephConfPath, (char *)value, MAX_PATH_LEN) == NULL) {
+        ProxyDbgLogErr("strncpy failed.");
+        return RETURN_ERROR;
+    }
 	return RETURN_OK;
     }
 
@@ -254,22 +260,28 @@ static int32_t AnalyzeSubString(uint8_t *str)
     if (value != NULL) {
 	ConfigTrim(value);
 	ProxyDbgLogInfo("read config: %s, value: %s.", LOG_OUT_PATH, value);
-        strcpy(g_ProxyCfg.logOutPath, (char *)value);
+    if(strncpy(g_ProxyCfg.logOutPath, (char *)value, MAX_PATH_LEN) == NULL) {
+        ProxyDbgLogErr("strncpy failed.");
+        return RETURN_ERROR;
+    }
 	return RETURN_OK;
     }
 
     value = SearchSubString(str, WORKER_NUM);
     if (value != NULL) {
-	ConfigTrim(value);
-	ProxyDbgLogInfo("read config: %s, value: %s.", WORKER_NUM, value);
-	return TransformValueToInt(value, &g_ProxyCfg.workerNum);
+        ConfigTrim(value);
+        ProxyDbgLogInfo("read config: %s, value: %s.", WORKER_NUM, value);
+        return TransformValueToInt(value, &g_ProxyCfg.workerNum);
     }
 
     value = SearchSubString(str, CORE_NUMBER);
     if (value != NULL) {
 	ConfigTrim(value);
 	ProxyDbgLogInfo("read config: %s, value: %s.", CORE_NUMBER, value);
-        strcpy(g_ProxyCfg.coreIds, (char *)value);
+    if(strncpy(g_ProxyCfg.coreIds, (char *)value, MAX_CORE_NUMBER) == NULL) {
+        ProxyDbgLogErr("strncpy failed.");
+        return RETURN_ERROR;
+    }
 	return RETURN_OK;
     }
 

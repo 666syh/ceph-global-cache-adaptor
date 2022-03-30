@@ -21,6 +21,7 @@ class MsgModule {
     void ConvertObjRw(OSDOp &clientop, OpRequestOps &oneOp);
     void ConvertOmapOp(OSDOp &clientop, OpRequestOps &oneOp);
     void ConvertAttrOp(OSDOp &clientop, OpRequestOps &oneOp);
+    void ConvertRollBackOp(OSDOp &clientop, OpRequestOps &oneOp);
 
 public:
     MsgModule() {}

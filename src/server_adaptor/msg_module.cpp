@@ -119,8 +119,15 @@ int MsgModule::ConvertClientopToOpreq(OSDOp &clientop, OpRequestOps &oneOp, Opti
         } break;
         case CEPH_OSD_OP_GETXATTRS:
         case CEPH_OSD_OP_STAT:
-        case CEPH_OSD_OP_CREATE:
         case CEPH_OSD_OP_CALL:
+        case CEPH_OSD_OP_LIST_SNAPS:
+            break;
+        case CEPH_OSD_OP_CREATE:
+            oneOp.opFlags = clientop.op.flags;
+            break;
+        case CEPH_OSD_OP_ROLLBACK:
+            ConvertRollBackOp(clientop, oneOp);
+            Salog(LV_DEBUG, LOG_TYPE, "rollback snapid: %s", oneOp.values[0]);
             break;
         default: {
             Salog(LV_DEBUG, LOG_TYPE, "Translate ClientOp, unknown op:0x%lX", oneOp.opSubType);
@@ -246,4 +253,11 @@ void MsgModule::ConvertAttrOp(OSDOp &clientop, OpRequestOps &oneOp)
             } break;
         }
     }
+}
+
+void MsgModule::ConvertRollBackOp(OSDOp &clientop, OpRequestOps &oneOp)
+{
+    ceph_osd_op &op = clientop.op;
+    oneOp.keys.push_back("snapid");
+    oneOp.values.push_back(to_string(op.snap.snapid));
 }

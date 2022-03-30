@@ -10,6 +10,7 @@
 #include <iostream>
 #include <string>
 #include <sys/prctl.h>
+#include <ctime>
 
 #include "common/config.h"
 #include "common/Timer.h"
@@ -28,12 +29,15 @@
 #define dout_subsys ceph_subsys_simple_client
 
 using namespace std;
+using std::chrono::high_resolution_clock;
+using std::chrono::milliseconds;
 
 namespace {
 const string LOG_TYPE = "NETWORK";
 const char *SA_THREAD_NAME = "gc_sa";
 MsgPerfRecord *g_msgPerf { nullptr };
-const uint32_t ONE_THOUSAND = 1024;
+const uint32_t SA_THOUSAND_DEC = 1000;
+const uint32_t COMMON_SLEEP_TIME_MS = 100;
 }
 
 void *ThreadServer(void *arg)
@@ -42,14 +46,31 @@ void *ThreadServer(void *arg)
     return nullptr;
 }
 
-void *ThreadClient(void *arg)
+static int easy_readdir(const std::string &dir, std::set<std::string> *out)
 {
-    static_cast<NetworkModule *>(arg)->ThreadFuncBodyClient();
+    DIR *h = ::opendir(dir.c_str());
+    if (!h){
+        return -errno;
+    }
+    struct dirent *de = nullptr;
+    while ((de = ::readdir(h))){
+        if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0){
+            continue;
+        }
+        out->insert(de->d_name);
+    }
+    closedir(h);
+    return 0;
+}
+
+void *ThreadFunc(NetworkModule *arg, int threadNum, int coreId)
+{
+    arg->OpHandlerThread(threadNum, coreId);
     return nullptr;
 }
 
 int NetworkModule::InitNetworkModule(const std::string &rAddr, const std::vector<std::string> &rPort,
-	       	const  std::string &sAddr, const std::string &sPort, int *bind)
+	const  std::string &sAddr, const std::string &sPort, int *bind)
 {
     Salog(LV_DEBUG, LOG_TYPE, "Init network module.");
     int ret;
@@ -69,10 +90,10 @@ int NetworkModule::InitNetworkModule(const std::string &rAddr, const std::vector
     }
 #ifdef SA_PERF
     if (msgPerf == nullptr) {
-	msgPerf = new MsgPerfRecord();
+	    msgPerf = new MsgPerfRecord();
     }
     if (g_msgPerf == nullptr) {
-	g_msgPerf = msgPerf;
+	    g_msgPerf = msgPerf;
     }
     msgPerf->start();
     Salog(LV_WARNING, LOG_TYPE, "SA_PERF open");
@@ -107,11 +128,11 @@ int NetworkModule::InitMessenger()
             return ret;
 	}
     } catch (const std::system_error& e) {
-	ret = 200;
-	Salog(LV_ERROR, LOG_TYPE, "std::system_error %s", e.what());
+	    ret = 200;
+	    Salog(LV_ERROR, LOG_TYPE, "std::system_error %s", e.what());
     } catch (const std::exception& e) {
-	ret = 200;
-	Salog(LV_ERROR, LOG_TYPE, "std::exception %s", e.what());
+	    ret = 200;
+	    Salog(LV_ERROR, LOG_TYPE, "std::exception %s", e.what());
     }
     return ret;
 }
@@ -123,6 +144,15 @@ int NetworkModule::FinishMessenger()
         i->shutdown();
         // i->wait();
     }
+    for (auto i : vecMsgThrottler){
+        delete i;
+    }
+    vecMsgThrottler.clear();
+
+    for (auto i : vecByteThrottler){
+        delete i;
+    }
+    vecByteThrottler.clear();
     if (clientMessenger) {
         clientMessenger->shutdown();
         clientMessenger->wait();
@@ -138,6 +168,9 @@ int NetworkModule::ThreadFuncBodyServer()
     int r = 0;
     pid_t pid = getpid();
     DummyAuthClientServer dummy_auth(g_ceph_context);
+    uint64_t messageSize = g_conf().get_val<Option::size_t>("osd_client_message_size_cap");
+    uint64_t messageCap = g_conf().get_val<uint64_t>("osd_client_message_cap");
+    Salog(LV_WARNING, LOG_TYPE, "messageSize=%lu messageCap=%lu", messageSize,messageCap);
     for (auto &i : vecPorts) {
 	entity_addr_t bind_addr;
 	string strPort = i;
@@ -155,15 +188,14 @@ int NetworkModule::ThreadFuncBodyServer()
 
         svrMessenger->set_auth_server(&dummy_auth);
         svrMessenger->set_magic(MSG_MAGIC_TRACE_CTR);
+        Throttle *clientByteThrottler = new Throttle(g_ceph_context,"osd_client_bytes",messageSize);
+        Throttle *clientMsgThrottler = new Throttle(g_ceph_context,"osd_client_messages",messageCap);
         svrMessenger->set_default_policy(Messenger::Policy::stateless_server(0));
-
-
-
-
-
-
-
-
+        if (qosParam.enableThrottle) {
+            Salog(LV_WARNING, LOG_TYPE, "set messenger throttlers.");
+            svrMessenger->set_policy_throttlers(entity_name_t::TYPE_CLIENT, clientByteThrottler, nullptr);
+            svrMessenger->set_policy_throttlers(entity_name_t::TYPE_CLIENT, clientMsgThrottler, nullptr);
+        }
         bind_addr.set_type(entity_addr_t::TYPE_MSGR2);
         r = svrMessenger->bind(bind_addr);
         if (r < 0) {
@@ -178,12 +210,14 @@ int NetworkModule::ThreadFuncBodyServer()
         svrMessenger->start();
         vecSvrMessenger.push_back(svrMessenger);
         vecDispatcher.push_back(svrDispatcher);
+        vecByteThrottler.push_back(clientByteThrottler);
+        vecMsgThrottler.push_back(clientMsgThrottler);
     }
     common_init_finish(g_ceph_context);
 
     if (bindMsgrCore) {
-	BindMsgrWorker(pid);
-	Salog(LV_WARNING, LOG_TYPE, "msgr-worker and ms_dispatch bind cores.", pid);
+	    BindMsgrWorker(pid);
+	    Salog(LV_WARNING, LOG_TYPE, "msgr-worker and ms_dispatch bind cores.");
     }
 
     if (!vecPorts.empty()) {
@@ -194,23 +228,6 @@ int NetworkModule::ThreadFuncBodyServer()
 out:
     Salog(LV_WARNING, LOG_TYPE, "Server exit");
     return r;
-}
-
-static int easy_readdir(const std::string &dir, std::set<std::string> *out)
-{
-    DIR *h = ::opendir(dir.c_str());
-    if (!h) {
-	return -errno;
-    }
-    struct dirent *de = nullptr;
-    while ((de = ::readdir(h))) {
-	if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) {
-	    continue;
-	}
-	out->insert(de->d_name);
-    }
-    closedir(h);
-    return 0;
 }
 
 void NetworkModule::BindMsgrWorker(pid_t pid)
@@ -226,7 +243,6 @@ void NetworkModule::BindMsgrWorker(pid_t pid)
 	string readPath = path;
 	readPath += "/" + i + "/status";
 	FILE *fp = fopen(readPath.c_str(), "r");
-
 	if (NULL == fp) {
 	    Salog(LV_ERROR, LOG_TYPE, "open file error:%s", readPath.c_str());
 	    return;
@@ -243,7 +259,6 @@ void NetworkModule::BindMsgrWorker(pid_t pid)
 		vecBindDispatch.push_back(atoll(i.c_str()));
 	    }
 	}
-
 	fclose(fp);
     }
     sort(vecBindMsgr.rbegin(), vecBindMsgr.rend());
@@ -268,9 +283,6 @@ void NetworkModule::BindMsgrWorker(pid_t pid)
 	if (n >= threadNum) {
 	    break;
 	}
-    }
-    for (vector<uint64_t>::iterator ite = vecBindDispatch.begin(); ite != (vecBindDispatch.end() - 1); ite++) {
-
     }
 }
 
@@ -308,119 +320,6 @@ void NetworkModule::BindCore(uint64_t ii, uint32_t n, bool isWorker)
 	 }
     }
 }
-	
-int NetworkModule::ThreadFuncBodyClient()
-{
-   ConnectionRef conn;
-    int r = 0;
-    int n_msgs = 10;
-    int n_dsize = 0;
-
-    struct timespec ts;
-    ts.tv_sec = 1;
-    ts.tv_nsec = 0;
-    cout << "ThreadFuncBodyClient starting "
-         << "dest sendAddr " << sendAddr << " "
-         << "dest sednPort " << sednPort << " "
-         << "initial msgs (pipe depth) " << n_msgs << " "
-         << "data buffer size " << n_dsize << std::endl;
-    cout << "ThreadFuncBodyClient ms_type=" << g_conf().get_val<std::string>("ms_type") << std::endl;
-    clientMessenger = Messenger::create(g_ceph_context, g_conf().get_val<std::string>("ms_type"),
-        entity_name_t::CLIENT(-1), "client", getpid(), 0);
-
-    DummyAuthClientServer dummy_auth(g_ceph_context);
-    clientMessenger->set_auth_client(&dummy_auth);
-    clientMessenger->set_magic(MSG_MAGIC_TRACE_CTR);
-    clientMessenger->set_default_policy(Messenger::Policy::lossy_client(0));
-
-
-    clientDispatcher = new SaClientDispatcher(clientMessenger, ptrMsgModule);
-    clientDispatcher->ms_set_require_authorizer(false);
-    clientMessenger->add_dispatcher_head(clientDispatcher);
-
-    clientDispatcher->set_active();
-
-    r = clientMessenger->start();
-    if (r < 0)
-        goto out;
-
-    time_t t1, t2;
-    t1 = time(NULL);
-
-    if (testPing || testMosdop) {
-        entity_addr_t dest_addr;
-        string dest_str = "tcp://";
-        dest_str += sendAddr;
-        dest_str += ":";
-        dest_str += sednPort;
-        entity_addr_from_url(&dest_addr, dest_str.c_str());
-        dest_addr.set_type(entity_addr_t::TYPE_MSGR2);
-        entity_addrvec_t dest_addrs(dest_addr);
-        conn = clientMessenger->connect_to_osd(dest_addrs);
-        while (!conn->is_connected()) {
-            nanosleep(&ts, NULL);
-        }
-
-        if (testPing) {
-            cerr << "ThreadFuncBodyClient send ping." << std::endl;
-            n_msgs = 5;
-            for (int msg_ix = 0; msg_ix < n_msgs; ++msg_ix) {
-                /* add a data payload if asked */
-                Message *m = new MPing();
-                cerr << "TEST: ClientAdaptor send ping " << msg_ix << std::endl;
-                conn->send_message(m);
-            }
-        }
-
-        if (testMosdop) {
-            cerr << "ThreadFuncBodyClient send MOSDOp" << std::endl;
-            n_msgs = 10;
-            for (int msg_ix = 0; msg_ix < n_msgs; ++msg_ix) {
-                std::atomic<unsigned> client_inc = { 0 };
-
-                object_t oid("object-name");
-                object_locator_t oloc(1, 1);
-                pg_t pgid;
-                hobject_t hobj(oid, oloc.key, CEPH_NOSNAP, pgid.ps(), pgid.pool(), oloc.nspace);
-
-                spg_t spgid(pgid);
-
-                MOSDOp *mosdop = new MOSDOp(client_inc, 0, hobj, spgid, 0, 0, 0);
-                cerr << "TEST: ClientAdaptor send MOSDOp " << msg_ix << std::endl;
-                conn->send_message(mosdop);
-            }
-        }
-    }
-
-    // do stuff
-    cout << "Connection is not connected." << std::endl;
-    t2 = time(NULL);
-    cout << "Processed " << clientDispatcher->get_dcount() + n_msgs << " round-trip messages in " << t2 - t1 << "s" <<
-        std::endl;
-out:
-    return r;
-}
-
-void NetworkModule::TestSimulateClient(bool ping, bool mosdop)
-{
-    testPing = ping;
-    testMosdop = mosdop;
-    startClientThread = true;
-    int ret = pthread_create(&clientThread, nullptr, ThreadClient, this);
-    if (ret) {
-        std::cerr << "Creating ThreadClient is failed ret= " << ret << std::endl;
-        startClientThread = false;
-    }
-
-    cout << "TestSimulateClient wait clientThread finish." << std::endl;
-    pthread_join(clientThread, nullptr);
-    cout << "TestSimulateClient is finished." << std::endl;
-}
-void *ThreadFunc(NetworkModule *arg, int threadNum, int coreId)
-{
-    arg->OpHandlerThread(threadNum, coreId);
-    return nullptr;
-}
 
 void NetworkModule::CreateWorkThread(uint32_t qnum, uint32_t portAmout, uint32_t qmaxcapacity)
 {
@@ -447,12 +346,14 @@ void NetworkModule::CreateWorkThread(uint32_t qnum, uint32_t portAmout, uint32_t
     for (uint64_t i = 0; i < queueNum; i++) {
         finishThread.push_back(false);
         opDispatcher.push_back(new ClientOpQueue());
+    }
+    for (uint64_t i = 0; i < queueNum; i++) {
 	int cpuNum = saCoreId[i % saCoreId.size()];
 	try {
         doOpThread.push_back(thread(ThreadFunc, this, i, cpuNum));
         } catch (const std::system_error& e) {
 	    Salog(LV_ERROR, LOG_TYPE, "std::system_error %s", e.what());
-	    ceph_assert("Create thread catch std::ystem_error" == nullptr);
+	    ceph_assert("Create thread catch std::system_error" == nullptr);
         } catch (const std::exception& e) {
 	    Salog(LV_ERROR, LOG_TYPE, "std::exception %s", e.what());
 	    ceph_assert("Create thread catch std::exception" == nullptr);
@@ -467,9 +368,15 @@ void NetworkModule::StopThread()
 	try {
             std::unique_lock<std::mutex> opReqLock(opDispatcher[i]->opQueueMutex);
             } catch (const std::system_error& e) {
-	        Salog(LV_ERROR, LOG_TYPE, "std::system_error %s", e.what());
+                if (e.code() == std::errc::operation_not_permitted) {
+                    Salog(LV_ERROR, LOG_TYPE, "there is no associated mutex");
+                }
+                if (e.code() == std::errc::resource_deadlock_would_occur) {
+                    Salog(LV_ERROR, LOG_TYPE, "the mutex is already locked by this unique_lock (in other words, owns_lock is true)");
+                }
+	            Salog(LV_ERROR, LOG_TYPE, "std::system_error %s", e.what());
             } catch (const std::exception& e) {
-	        Salog(LV_ERROR, LOG_TYPE, "std::exception %s", e.what());
+	            Salog(LV_ERROR, LOG_TYPE, "std::exception %s", e.what());
 	    }
         finishThread[i] = true;
     }
@@ -516,11 +423,22 @@ void NetworkModule::OpHandlerThread(int threadNum, int coreId)
     std::queue<uint64_t> periodTs; 
     std::unique_lock<std::mutex> opReqLock;
     try {
-	opReqLock = std::unique_lock<std::mutex>(opDispatch->opQueueMutex);
+	opReqLock = std::unique_lock<std::mutex>(opDispatch->opQueueMutex, std::defer_lock);
+    if (opReqLock.owns_lock()) {
+        Salog(LV_ERROR, LOG_TYPE, "owns_lock, no_lock");
+    } else {
+        opReqLock.lock();
+    }
     } catch (const std::system_error& e) {
 	Salog(LV_ERROR, LOG_TYPE, "std::system_error %s", e.what());
+    if (e.code() == std::errc::operation_not_permitted) {
+        Salog(LV_ERROR, LOG_TYPE, "there is no associated mutex");
+    }
+    if (e.code() == std::errc::resource_deadlock_would_occur) {
+        Salog(LV_ERROR, LOG_TYPE, "the mutex is already locked by this unique_lock (in other words, owns_lock is true)");
+    }
 	sleep(1);
-	ceph_assert("Lock queue mutex catch std::ystem_error 1" == nullptr);
+	ceph_assert("Lock queue mutex catch std::system_error 1" == nullptr);
     } catch (const std::exception& e) {
 	Salog(LV_ERROR, LOG_TYPE, "std::exception %s", e.what());
 	sleep(1);
@@ -536,31 +454,96 @@ void NetworkModule::OpHandlerThread(int threadNum, int coreId)
 	    try {
                 opReqLock.unlock();
             } catch (const std::system_error& e) {
-	        Salog(LV_ERROR, LOG_TYPE, "std::system_error %s", e.what());
+	            Salog(LV_ERROR, LOG_TYPE, "std::system_error %s", e.what());
+                if (e.code() == std::errc::operation_not_permitted) {
+                    Salog(LV_ERROR, LOG_TYPE, "there is no associated mutex");
+                }
+                if (e.code() == std::errc::resource_deadlock_would_occur) {
+                    Salog(LV_ERROR, LOG_TYPE, "the mutex is already locked by this unique_lock (in other words, owns_lock is true)");
+                }
 	        sleep(1);
-	        ceph_assert("Unlock queue mutex catch std::ystem_error 1" == nullptr);
+	            ceph_assert("Unlock queue mutex catch std::system_error 1" == nullptr);
             } catch (const std::exception& e) {
 	        Salog(LV_ERROR, LOG_TYPE, "std::exception %s", e.what());
 	        sleep(1);
 	        ceph_assert("Unlock queue mutex catch std::exception 1" == nullptr);
   	    }
             //
-            while (!dealQueue.empty()) {
-                MOSDOp *op = dealQueue.front();
-                dealQueue.pop();
+        while (!dealQueue.empty()) {
+            SaOpReq *opreq = new SaOpReq;
+            if (opreq == nullptr) {
+                SalogLimit(LV_ERROR, LOG_TYPE, "new nullptr");
+                usleep(COMMON_SLEEP_TIME_MS * SA_THOUSAND_DEC);
+                continue;
+            }
+            uint64_t ts = dealTs.front();
+            dealTs.pop();
+            if (ProcessOpReq(dealQueue, periodTs, opreq) != 0) {
+                delete opreq;
+                sa->FtdsEndHigt(SA_FTDS_OP_LIFE, ts, 0);
+                continue;
+            }
+            sa->DoOneOps(*opreq);
+            //
+            sa->FtdsEndHigt(SA_FTDS_OP_LIFE, ts, 0);
+        }
+        uint64_t lockTsOne = 0;
+        sa->FtdsStartHigh(SA_FTDS_LOCK_ONE, lockTsOne);
+        try {
+            opReqLock.lock();
+        } catch (const std::system_error& e) {
+            if (e.code() == std::errc::operation_not_permitted) {
+                Salog(LV_ERROR, LOG_TYPE, "there is no associated mutex");
+            }
+            if (e.code() == std::errc::resource_deadlock_would_occur) {
+                Salog(LV_ERROR, LOG_TYPE, "the mutex is already locked by this unique_lock (in other words, owns_lock is true)");
+            }
+            Salog(LV_ERROR, LOG_TYPE, "std::system_error %s", e.what());
+            sleep(1);
+            ceph_assert("Lock queue mutex catch std::system_error 2" == nullptr);
+        } catch (const std::exception& e) {
+            Salog(LV_ERROR, LOG_TYPE, "std::exception %s", e.what());
+            sleep(1);
+            ceph_assert("Lock queue mutex catch std::exception 2" == nullptr);
+        }
+        sa->FtdsEndHigt(SA_FTDS_LOCK_ONE, lockTsOne, 0);
+        continue;
+    }
+    try {
+        opDispatch->condOpReq.wait(opReqLock);
+    } catch (const std::system_error& e) {
+        if (e.code() == std::errc::operation_not_permitted) {
+            Salog(LV_ERROR, LOG_TYPE, "there is no associated mutex");
+        }
+        if (e.code() == std::errc::resource_deadlock_would_occur) {
+            Salog(LV_ERROR, LOG_TYPE, "the mutex is already locked by this unique_lock (in other words, owns_lock is true)");
+        }
+        Salog(LV_ERROR, LOG_TYPE, "std::system_error %s", e.what());
+        sleep(1);
+        ceph_assert("Wait queue mutex catch std::system_error 1" == nullptr);
+    } catch (const std::exception& e) {
+        Salog(LV_ERROR, LOG_TYPE, "std::exception %s", e.what());
+        sleep(1);
+        ceph_assert("Wait queue mutex catch std::exception 1" == nullptr);
+    }
+    }
+    Salog(LV_WARNING, "OpHandler", "OpHandlerThread  Finish");
+}
 
-		uint64_t ts = dealTs.front();
-		dealTs.pop();
+int NetworkModule::ProcessOpReq(std::queue<MOSDOp *> &dealQueue, std::queue<uint64_t> &periodTs, SaOpReq *opreq)
+{
+        MOSDOp *op = dealQueue.front();
+        dealQueue.pop();
 
 		uint64_t pts = periodTs.front();
 		periodTs.pop();
 		sa->FtdsEndHigt(SA_FTDS_QUEUE_PERIOD, pts, 0);
 		uint64_t transTs = 0;
 		sa->FtdsStartHigh(SA_FTDS_TRANS_OPREQ, transTs);
-                SaOpReq *opreq = new SaOpReq;
                 opreq->opType = OBJECT_OP;
                 opreq->snapId = op->get_snapid();
-                opreq->poolId = op->get_pg().pool();
+                opreq->poolId = op->get_pg().pool() & 0xFFFFFFFFULL;
+                opreq->ptVersion = op->get_pg().pool() >> 32;
                 opreq->opsSequence = op->get_header().seq;
                 opreq->ptrMosdop = op;
                 opreq->ptId = op->get_pg().m_seed;
@@ -581,10 +564,10 @@ void NetworkModule::OpHandlerThread(int threadNum, int coreId)
                     if (vecObj.size() >= 3) {
                         isRbd = true;
                     } else {
-                        Salog(LV_CRITICAL, LOG_TYPE, "rbd_obj_id is %d sections, this op return -EINVAL",
-                           vecObj.size());
+                        Salog(LV_CRITICAL, LOG_TYPE, "rbd_obj_id is %s, %d sections, this op return -EINVAL",
+                           op->get_oid().name.c_str(), vecObj.size());
                         FinishCacheOps(op, -EINVAL);
-                        continue;
+                        return 1;
                     }
                 }
 		OptionsType optionType = { 0 };
@@ -608,40 +591,13 @@ void NetworkModule::OpHandlerThread(int threadNum, int coreId)
 			opreq->optionType = GCACHE_WRITE;
 		}
 
-		sa->FtdsEndHigt(SA_FTDS_TRANS_OPREQ, transTs, 0);
-		sa->DoOneOps(*opreq);
-
-		sa->FtdsEndHigt(SA_FTDS_OP_LIFE, ts, 0);
-            }
-	    uint64_t lockTsOne = 0;
-	    sa->FtdsStartHigh(SA_FTDS_LOCK_ONE, lockTsOne);
-	    try {
-                opReqLock.lock();
-            } catch (const std::system_error& e) {
-	        Salog(LV_ERROR, LOG_TYPE, "std::system_error %s", e.what());
-	        sleep(1);
-	        ceph_assert("Lock queue mutex catch std::ystem_error 1" == nullptr);
-            } catch (const std::exception& e) {
-	        Salog(LV_ERROR, LOG_TYPE, "std::exception %s", e.what());
-	        sleep(1);
-	        ceph_assert("Lock queue mutex catch std::exception 1" == nullptr);
-            }
-	    sa->FtdsEndHigt(SA_FTDS_LOCK_ONE, lockTsOne, 0);
-            continue;
+		opreq->snapSeq = op->get_snap_seq();
+        for (auto &i : op->get_snaps()) {
+            opreq->snaps.push_back(i.val);
         }
-	try {
-            opDispatch->condOpReq.wait(opReqLock);
-        } catch (const std::system_error& e) {
-	    Salog(LV_ERROR, LOG_TYPE, "std::system_error %s", e.what());
-	    sleep(1);
-	    ceph_assert("Unlock queue mutex catch std::ystem_error 1" == nullptr);
-        } catch (const std::exception& e) {
-	    Salog(LV_ERROR, LOG_TYPE, "std::exception %s", e.what());
-	    sleep(1);
-	    ceph_assert("Unlock queue mutex catch std::exception 1" == nullptr);
-  	}
-    }
-    Salog(LV_WARNING, "OpHandler", "OpHandlerThread  Finish");
+
+        sa->FtdsEndHigt(SA_FTDS_TRANS_OPREQ, transTs, 0);
+        return 0;
 }
 
 uint32_t NetworkModule::EnqueueClientop(MOSDOp *opReq)
@@ -658,17 +614,109 @@ uint32_t NetworkModule::EnqueueClientop(MOSDOp *opReq)
 
     opReq->finish_decode();
     size_t idx = std::hash<std::string> {}(opReq->get_oid().name) % queueNum;
-    std::unique_lock<std::mutex> opReqLock(opDispatcher[idx]->opQueueMutex);
+    std::unique_lock<std::mutex> opReqLock;
+    try {
+        opReqLock = std::unique_lock<std::mutex>(opDispatcher[idx]->opQueueMutex, std::defer_lock);
+        if (opReqLock.owns_lock()) {
+            Salog(LV_ERROR, LOG_TYPE, "owns_lock, no_lock");
+        } else {
+            opReqLock.lock();
+        }
+    } catch (const std::system_error& e) {
+        Salog(LV_ERROR, LOG_TYPE, "std::system_error %s", e.what());
+        if (e.code() == std::errc::operation_not_permitted) {
+            Salog(LV_ERROR, LOG_TYPE, "there is no associated mutex");
+        }
+        if (e.code() == std::errc::resource_deadlock_would_occur) {
+            Salog(LV_ERROR, LOG_TYPE, "the mutex is already locked by this unique_lock (in other words, owns_lock is true)");
+        }
+        sleep(1);
+        ceph_assert("Lock queue mutex catch std::system_error 1" == nullptr);
+    } catch (const std::exception& e) {
+        Salog(LV_ERROR, LOG_TYPE, "std::exception %s", e.what());
+        sleep(1);
+        ceph_assert("Lock queue mutex catch std::exception 1" == nullptr);
+    }
     uint64_t periodTs = 0;
     sa->FtdsStartHigh(SA_FTDS_QUEUE_PERIOD, periodTs);
     if (opDispatcher[idx]->GetSize() > queueMaxCapacity) {
-        SalogLimit(LV_WARNING, LOG_TYPE, "%d queue_capacity_is_large. %d %d", idx, opDispatcher[idx]->GetSize());
+        SalogLimit(LV_WARNING, LOG_TYPE, "%d queue_capacity_is_large. %d", idx, opDispatcher[idx]->GetSize());
         opDispatcher[idx]->cond.wait(opReqLock);
     }
     opDispatcher[idx]->EnQueue(opReq, ts, periodTs);
     Salog(LV_DEBUG, LOG_TYPE, "MOSDOp is in the queue.  vec_index=%ld", idx);
     sa->FtdsEndHigt(SA_FTDS_MOSDOP_ENQUEUE, enqueTs, 0);
+
+    if (qosParam.limitWrite && ContainWriteOp(*opReq)) {
+        LimitWrite(*opReq);
+    }
     return ret;
+}
+
+bool NetworkModule::ContainWriteOp(const MOSDOp &op)
+{
+    for (auto &i : op.ops) {
+        if (i.op.op == CEPH_OSD_OP_WRITEFULL || i.op.op == CEPH_OSD_OP_WRITE) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void NetworkModule::SetQosParam(const QosParam &p)
+{
+    qosParam = p;
+}
+
+void NetworkModule::LimitWrite(const MOSDOp &op)
+{
+    std::unique_lock<std::mutex> lock = std::unique_lock<std::mutex>(limitWriteMtx);
+    high_resolution_clock::time_point nowTime = std::chrono::high_resolution_clock::now();
+    milliseconds timeInterval;
+    if (likely(nowTime >= cycleBegin)) {
+        timeInterval = std::chrono::duration_cast<std::chrono::milliseconds>(nowTime - cycleBegin);
+        Salog(LV_DEBUG, LOG_TYPE, "timeInterval=%ld cycleBegin=%ld nowTime=%ld", timeInterval.count(),
+            cycleBegin, nowTime);
+    }
+    while (timeInterval.count() >= qosParam.getQuotaCycle) {
+        unsigned int poolId = op.get_pg().pool() & 0xFFFFFFFFULL;
+        sa->GetWriteQuota(poolId, qosInfo);
+        if (qosParam.getQuotaCycle < SA_THOUSAND_DEC) {
+            wcacheBW = qosInfo.writeRatio / (SA_THOUSAND_DEC / qosParam.getQuotaCycle);
+        } else {
+            wcacheBW = qosInfo.writeRatio * (qosParam.getQuotaCycle / SA_THOUSAND_DEC);
+        }
+        if (qosInfo.writeRatio == 0) {
+            Salog(LV_INFORMATION, LOG_TYPE, "writeRatio==0, stop, sleep %u ms", qosParam.getQuotaCycle);
+            usleep(qosParam.getQuotaCycle * SA_THOUSAND_DEC);
+            Salog(LV_INFORMATION, LOG_TYPE, "writeRatio==0, stop, finish sleep");
+            continue;
+        } else {
+            periodBW = 0;
+            cycleBegin = std::chrono::high_resolution_clock::now();
+            Salog(LV_DEBUG, LOG_TYPE, "writeRatio=%ld, collect write op len", qosInfo.writeRatio);
+            break;
+        }
+    }
+    for (auto &i : op.ops) {
+        if (i.op.op == CEPH_OSD_OP_WRITEFULL || i.op.op == CEPH_OSD_OP_WRITE) {
+            periodBW += i.op.extent.length / 1024;
+        }
+    }
+    Salog(LV_DEBUG, LOG_TYPE, "periodBW=%lu,wcacheBW=%lu", periodBW, wcacheBW);
+    if (periodBW >= wcacheBW) {
+        nowTime = std::chrono::high_resolution_clock::now();
+        timeInterval = std::chrono::duration_cast<std::chrono::milliseconds>(nowTime - cycleBegin);
+        Salog(LV_DEBUG, LOG_TYPE, "nowTime=%lu,cycleBegin=%lu,timeInterval=%lu", nowTime, cycleBegin, timeInterval.count());
+        if (timeInterval.count() <= qosParam.getQuotaCycle) {
+            uint iWait = qosParam.getQuotaCycle - timeInterval.count();
+            if (iWait != 0) {
+                Salog(LV_INFORMATION, LOG_TYPE, "after collect, sleep %lu ms", iWait);
+                usleep(iWait * SA_THOUSAND_DEC);
+                Salog(LV_INFORMATION, LOG_TYPE, "after collect, finish sleep");
+            }
+        }
+    }
 }
 
 void FinishCacheOps(void *op, int32_t r)
@@ -788,4 +836,38 @@ void EncodeGetOpstat(uint64_t psize, time_t ptime, int i, MOSDOp *mosdop)
 {
     encode(psize, mosdop->ops[i].outdata);
     encode(ptime, mosdop->ops[i].outdata);
+}
+
+void EncodeListSnaps(const ObjSnaps *objSnaps, int i, MOSDOp *mosdop)
+{
+    obj_list_snap_response_t resp;
+    resp.seq = 0;
+    if (objSnaps->cloneInfoNum >= 2) {
+        resp.seq = snapid_t(objSnaps->cloneInfos[objSnaps->cloneInfoNum - 2].cloneid);
+    }
+
+    for (uint32_t j = 0; j < objSnaps->cloneInfoNum - 1; j++) {
+        clone_info ci;
+        CloneInfo &CI = objSnaps->cloneInfos[j];
+        ci.cloneid = snapid_t(CI.cloneid);
+        ci.size = CI.objSize;
+
+        for (uint32_t si = 0; si < CI.snapNum; si++) {
+            ci.snaps.push_back(snapid_t(CI.snaps[si]));
+        }
+
+        for (uint32_t oi = 0; oi < CI.overlapNum; oi++) {
+            ci.overlap.push_back(std::make_pair(CI.overlaps[oi][0], CI.overlaps[oi][1]));
+        }
+        resp.clones.push_back(ci);
+    }
+    {
+        clone_info ci;
+        CloneInfo &CI = objSnaps->cloneInfos[objSnaps->cloneInfoNum - 1];
+        ci.cloneid = snapid_t(-2);
+        ci.size = CI.objSize;
+        resp.clones.push_back(ci);
+    }
+
+    resp.encode(mosdop->ops[i].outdata);
 }

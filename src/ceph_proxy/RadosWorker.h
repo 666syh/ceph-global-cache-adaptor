@@ -1,6 +1,6 @@
 /* License:LGPL-2.1
  *
- * Copyright (c) 2021 Huawei Technologies Co., Ltf All rights reserved.
+ * Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
  *
  */
 
@@ -27,8 +27,8 @@
 
 #define WORKER_MAX_NUM 8
 
-const unsigned PAGE_SIZE = sysconf(_SC_PAGESIZE);
-const unsigned long PAGE_MASK = ~(unsigned long)(PAGE_SIZE -1);
+const unsigned PROXY_PAGE_SIZE = sysconf(_SC_PAGESIZE);
+const unsigned long PAGE_MASK = ~(unsigned long)(PROXY_PAGE_SIZE -1);
 
 typedef enum {
     RADOSWORKER_INITED = 0,

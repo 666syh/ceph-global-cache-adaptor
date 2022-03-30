@@ -1,12 +1,13 @@
 /* License:LGPL-2.1
  *
- * Copyright (c) 2021 Huawei Technologies Co., Ltf All rights reserved.
+ * Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
  *
  */
 
 #include "RadosWorker.h"
 #include "CephProxyOp.h"
 #include "RadosWrapper.h"
+#include "CephProxyFtds.h"
 
 #include <pthread.h>
 #include <string>
@@ -77,7 +78,9 @@ void* RadosIOWorker::OpHandler() {
 
     while(!ioworkerStop) {
 	while(!Ops.empty()) {
+		uint64_t ts = 0;
 	    int32_t ret = 0;
+		PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_WAITQ, ts);
 	    std::vector<RequestCtx> ls;
 	    ls.swap(Ops);
 	    ioworkerRunning = true;
@@ -88,8 +91,8 @@ void* RadosIOWorker::OpHandler() {
     		RadosObjectOperation *operation = reinterpret_cast<RadosObjectOperation *>(opair.op);
 		rados_ioctx_t ioctx = proxy->GetIoCtx2(operation->poolId);
 		if (ioctx == NULL) {
-		    ProxyDbgLogErr("Get IOCtx Failed.\n");
-		    c->fn(ENOMEM, c->cbArg);
+		    ProxyDbgLogWarnLimit1("Get IOCtx(%u) Failed.", operation->poolId);
+		    c->fn(-ENOENT, c->cbArg);
 		    continue;
 		}
 
@@ -104,6 +107,7 @@ void* RadosIOWorker::OpHandler() {
 
 	    ul.lock();
 	    ioworkerRunning = false;
+		PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_WAITQ, ts, ret);
 	}
 	
 	if (ioworkerEmptyWait) {

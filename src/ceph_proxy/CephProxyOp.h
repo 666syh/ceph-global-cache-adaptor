@@ -1,6 +1,6 @@
 /* License:LGPL-2.1
  *
- * Copyright (c) 2021 Huawei Technologies Co., Ltf All rights reserved.
+ * Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
  *
  */
 
@@ -171,15 +171,16 @@ public:
 class RadosObjectWriteOp : public RadosObjectOperation {
 public:
     librados::ObjectWriteOperation op;
+    bool isRemove;
     bufferlist bl;
 public:
     RadosObjectWriteOp(const string& pool, const string& oid)
-      : RadosObjectOperation(BATCH_WRITE_OP, pool, oid) {
+      : RadosObjectOperation(BATCH_WRITE_OP, pool, oid), isRemove(false) {
 
     }
 
     RadosObjectWriteOp(const int64_t poolId, const string &oid)
-      : RadosObjectOperation(BATCH_WRITE_OP, poolId, oid) {
+      : RadosObjectOperation(BATCH_WRITE_OP, poolId, oid), isRemove(false) {
 
     }
 

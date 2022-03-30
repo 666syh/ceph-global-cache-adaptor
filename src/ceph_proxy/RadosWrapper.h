@@ -60,7 +60,7 @@ void RadosWriteOpCreateObject(rados_op_t op, int exclusive, const char *category
 
 void RadosWriteOpWrite(rados_op_t op, const char *buffer, size_t len, uint64_t off);
 
-void RadosWriteOpWriteSGL(rados_op_t op, SGL_S *s, size_t len1, uint64_t off, char *buffer, size_t len2, int isRelease);
+void RadosWriteOpWriteSGL(rados_op_t op, SGL_S *s, size_t len1, uint64_t off, AlignBuffer *alignBuffer, int isRelease);
 
 void RadosWriteOpWriteFull(rados_op_t op, const char *buffer, size_t len);
 
