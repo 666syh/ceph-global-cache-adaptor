@@ -16,6 +16,7 @@ message(STATUS "GLOBAL_CACHE_INFRAS_LIB_DIR: " ${GLOBAL_CACHE_INFRAS_LIB_DIR})
 
 include_directories(
         ${CEPH_DIR}/src/
+        ${CEPH_DIR}/src/boost/
         ${CEPH_DIR}/src/include/
         ${CEPH_DIR}/build/include/
         ${CEPH_DIR}/build/src/include/
