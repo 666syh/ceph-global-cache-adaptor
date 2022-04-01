@@ -63,10 +63,10 @@ index 0000000..9cf71f1
 +
 diff --git a/src/client_adaptor/ClientAdaptorMgr.cc b/src/client_adaptor/ClientAdaptorMgr.cc
 new file mode 100644
-index 0000000..58d0d7c
+index 0000000..8de6e67
 --- /dev/null
 +++ b/src/client_adaptor/ClientAdaptorMgr.cc
-@@ -0,0 +1,196 @@
+@@ -0,0 +1,197 @@
 +/* License:LGPL-2.1
 +*
 +* Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
@@ -111,6 +111,7 @@ index 0000000..58d0d7c
 +void ClientAdaptorCcm::ccm_deregister(Objecter *obj)
 +{
 +    if (register_objs.count(obj) > 0) {
++        OpenDeregisterViewChangeNotifyChain(register_objs[obj]);
 +        delete register_objs[obj];
 +        register_objs.erase(obj);
 +    }
@@ -1043,10 +1044,10 @@ index 0000000..fa7d71d
 +#endif
 diff --git a/src/client_adaptor/open_ccm.h b/src/client_adaptor/open_ccm.h
 new file mode 100644
-index 0000000..0b238b9
+index 0000000..3b43900
 --- /dev/null
 +++ b/src/client_adaptor/open_ccm.h
-@@ -0,0 +1,429 @@
+@@ -0,0 +1,431 @@
 +/* 
 + * Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
 +
@@ -1464,6 +1465,8 @@ index 0000000..0b238b9
 +int32_t OpenAgentGetNodeInfo(uint32_t nodeId, NodeInfo *nodeInfo);
 +
 +int32_t OpenRegisterViewChangeNotifyChain(PTViewChangeOpHandle *handle, uint8_t type);
++
++void OpenDeregisterViewChangeNotifyChain(PTViewChangeOpHandle *handle);
 +
 +int32_t OpenCreateSnapshot(const int64_t poolId, const char *imageId, const uint64_t snapId);
 +
