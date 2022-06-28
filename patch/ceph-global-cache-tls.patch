@@ -29,7 +29,7 @@ index 28ec983..40090cb 100644
  set_target_properties(ceph-common PROPERTIES
    SOVERSION 0
 diff --git a/src/msg/async/PosixStack.cc b/src/msg/async/PosixStack.cc
-index e9c8d40..0dc8607 100644
+index e9c8d40..527c635 100644
 --- a/src/msg/async/PosixStack.cc
 +++ b/src/msg/async/PosixStack.cc
 @@ -13,7 +13,6 @@
@@ -40,23 +40,13 @@ index e9c8d40..0dc8607 100644
  #include <sys/socket.h>
  #include <netinet/tcp.h>
  #include <netinet/in.h>
-@@ -33,10 +32,263 @@
+@@ -33,10 +32,254 @@
  #include "include/compat.h"
  #include "include/sock_compat.h"
  
 +
 +#define RETRY_TIME 10000
 +#define MAX_VERIFY_DEPTH 10
-+
-+//int32_t g_connect_count;
-+std::atomic_int g_connect_count(0);
-+
-+void lock_dec_connect()
-+{
-+	// g_connect_count--;
-+    g_connect_count.fetch_sub(1, std::memory_order_relaxed);
-+	return;
-+}
 +
  #define dout_subsys ceph_subsys_ms
  #undef dout_prefix
@@ -91,6 +81,15 @@ index e9c8d40..0dc8607 100644
 +    int r = handler.reconnect(sa, _fd);
 +
 +    if (r == 0) {
++      if (is_handShaked == false) {
++          int ret = SSL_connect(ssl);
++          if (ret > 0) {
++              is_handShaked = true;
++              ldout(cct, 20) << " TLS Socket " << _fd << " reconnect success" << dendl;
++          } else {
++              ldout(cct, 20) << " Socket " << _fd << " reconnect success, but TLS Socket reconnect failed" << dendl;
++          }
++      }
 +      connected = true;
 +      return 1;
 +    } else if (r < 0) {
@@ -124,7 +123,7 @@ index e9c8d40..0dc8607 100644
 +    } else {
 +        ret = SSL_connect(ssl);
 +        if (ret <= 0) {
-+            ldout(cct, 3) << "ssl accept failed fd: " <<  _fd  << " retry time: " << retry_count << dendl;
++            ldout(cct, 3) << "ssl connect failed fd: " <<  _fd  << " retry time: " << retry_count << dendl;
 +            return 0;
 +        }
 +        ldout(cct, 1) << "ssl connect success fd: " <<  _fd  << " retry time: " << retry_count << dendl;
@@ -162,69 +161,62 @@ index e9c8d40..0dc8607 100644
 +      } else {
 +        r = -read_errno;
 +      }
++      return r;
 +    }
++    ldout(cct, 5) << " TLS read successful, fd=" << _fd << " r = " << r << dendl;
 +    return r;
 +  }
 +
 +  ssize_t do_sendmsg(int fd, struct msghdr &msg, unsigned len, bool more, SSL* ssl)
 +  {
 +    char* tempBuffer = (char*)malloc(len);
++    char *cur;
 +    if (tempBuffer == nullptr) {
 +      return -1;
 +    }
-+    size_t sent = 0;
-+    while (1) {
-+      MSGR_SIGPIPE_STOPPER;
-+      ssize_t r;
-+      if (msg.msg_iov[0].iov_len == 0) {
-+          msg.msg_iov++;
-+          msg.msg_iovlen--;
-+          continue;
-+      }
-+      int offset = 0;
-+      for (int i = 0; i < msg.msg_iovlen; ++i) {
++    cur = tempBuffer;
++
++    int offset = 0;
++    for (int i = 0; i < msg.msg_iovlen; ++i) {
 +        memcpy(tempBuffer + offset, msg.msg_iov[i].iov_base, msg.msg_iov[i].iov_len);
 +        offset += msg.msg_iov[i].iov_len;
-+      }
-+      int32_t retrytimes = RETRY_TIME;
++    }
++    ceph_assert(offset == len);
++    int remain = offset;
++
++    size_t sent = 0;
++    while (remain > 0) {
++      MSGR_SIGPIPE_STOPPER;
++      ssize_t r;
++
 +      int write_errno = 0;
 +      int32_t ssl_err = 0;
-+      //do {
++
 +        ERR_clear_error();
-+        r = SSL_write(ssl, tempBuffer, len);
++        r = SSL_write(ssl, cur, remain);
 +        write_errno = errno;
 +        if (r <= 0) {
 +            ssl_err = SSL_get_error(ssl, r);
 +            long error = ERR_get_error();
 +            const char* error_string = ERR_error_string(error, NULL);
-+            if (write_errno == EINTR  || ssl_err == SSL_ERROR_WANT_READ || ssl_err == SSL_ERROR_WANT_WRITE) {
++            if (write_errno == EINTR) {
 +                continue;
-+            } else if (write_errno == EAGAIN) {
++            } else if (write_errno == EAGAIN || ssl_err == SSL_ERROR_WANT_READ || ssl_err == SSL_ERROR_WANT_WRITE) {
 +                ldout(cct, 4) << "TLS write fail, r = " <<  r << "   errno = " << write_errno << " fd: " << _fd << " ssl_errno: "<< ssl_err << " ssl_errno_str: " << error_string <<dendl;
-+                break;
++                free(tempBuffer);
++                return (ssize_t)sent;
 +            } else {
 +                lderr(cct) << __func__ << " TLS sent failed r = " << r << " ssl_errno: " <<  ssl_err << " errno: "<< write_errno << " fd: " << _fd << " ssl_errno_str: " << error_string << dendl;
 +                free (tempBuffer);
-+                return -1;
++                return -write_errno;
 +            }
 +        }
 +
 +      sent += r;
-+      if (len == sent) break;
-+
-+      while (r > 0) {
-+        if (msg.msg_iov[0].iov_len <= (size_t)r) {
-+          // drain this whole item
-+          r -= msg.msg_iov[0].iov_len;
-+          msg.msg_iov++;
-+          msg.msg_iovlen--;
-+        } else {
-+          msg.msg_iov[0].iov_base = (char *)msg.msg_iov[0].iov_base + r;
-+          msg.msg_iov[0].iov_len -= r;
-+          break;
-+        }
-+      }
++      cur += r;
++      remain -= r;
 +    }
++    ldout(cct, 5) << " TLS write successful, fd=" << fd << " r = " << sent << dendl;
 +    free (tempBuffer);
 +    return (ssize_t)sent;
 +  }
@@ -287,9 +279,8 @@ index e9c8d40..0dc8607 100644
 +  }
 +  void close() override {
 +    ::close(_fd);
-+    lock_dec_connect();
-+    ldout(cct, 3) << "close  lock_dec_connect  count:  " <<  g_connect_count << "   fd:   "  <<  _fd  << dendl;
-+    SSL_free (ssl);
++    ldout(cct, 3) << "ssl close " << " fd:   "  <<  _fd  << dendl;
++    SSL_free(ssl);
 +  }
 +  int fd() const override {
 +    return _fd;
@@ -304,7 +295,7 @@ index e9c8d40..0dc8607 100644
  class PosixConnectedSocketImpl final : public ConnectedSocketImpl {
    NetHandler &handler;
    int _fd;
-@@ -45,7 +297,8 @@ class PosixConnectedSocketImpl final : public ConnectedSocketImpl {
+@@ -45,7 +288,8 @@ class PosixConnectedSocketImpl final : public ConnectedSocketImpl {
  
   public:
    explicit PosixConnectedSocketImpl(NetHandler &h, const entity_addr_t &sa, int f, bool connected)
@@ -314,7 +305,7 @@ index e9c8d40..0dc8607 100644
  
    int is_connected() override {
      if (connected)
-@@ -68,13 +321,12 @@ class PosixConnectedSocketImpl final : public ConnectedSocketImpl {
+@@ -68,13 +312,12 @@ class PosixConnectedSocketImpl final : public ConnectedSocketImpl {
  
    ssize_t read(char *buf, size_t len) override {
      ssize_t r = ::read(_fd, buf, len);
@@ -330,7 +321,7 @@ index e9c8d40..0dc8607 100644
    static ssize_t do_sendmsg(int fd, struct msghdr &msg, unsigned len, bool more)
    {
      size_t sent = 0;
-@@ -82,6 +334,7 @@ class PosixConnectedSocketImpl final : public ConnectedSocketImpl {
+@@ -82,6 +325,7 @@ class PosixConnectedSocketImpl final : public ConnectedSocketImpl {
        MSGR_SIGPIPE_STOPPER;
        ssize_t r;
        r = ::sendmsg(fd, &msg, MSG_NOSIGNAL | (more ? MSG_MORE : 0));
@@ -338,7 +329,7 @@ index e9c8d40..0dc8607 100644
        if (r < 0) {
          if (errno == EINTR) {
            continue;
-@@ -169,16 +422,22 @@ class PosixConnectedSocketImpl final : public ConnectedSocketImpl {
+@@ -169,16 +413,22 @@ class PosixConnectedSocketImpl final : public ConnectedSocketImpl {
    friend class PosixNetworkStack;
  };
  
@@ -364,58 +355,36 @@ index e9c8d40..0dc8607 100644
    void abort_accept() override {
      ::close(_fd);
    }
-@@ -188,23 +447,50 @@ class PosixServerSocketImpl : public ServerSocketImpl {
+@@ -188,23 +438,28 @@ class PosixServerSocketImpl : public ServerSocketImpl {
  };
  
  int PosixServerSocketImpl::accept(ConnectedSocket *sock, const SocketOptions &opt, entity_addr_t *out, Worker *w) {
 +  certParam_t certParam;
-+  if (certParamInit(&certParam) != 0) {
-+    // TODO: error log
-+    return -1;
-+  }
-+  // g_connect_count++;
-+  int32_t cur_connect_count = g_connect_count.fetch_add(1, std::memory_order_relaxed) + 1;
-+  ldout(cct, 3) << " connection ++  count:  " <<  cur_connect_count  <<dendl;
 +
    ceph_assert(sock);
    sockaddr_storage ss;
    socklen_t slen = sizeof(ss);
    int sd = accept_cloexec(_fd, (sockaddr*)&ss, &slen);
    if (sd < 0) {
-+    // g_connect_count--;
-+    lock_dec_connect();
-+    ldout(cct, 3) << " accept_cloexec failed  count:  " <<  g_connect_count <<  "  errno:  "<<  errno  << dendl;
++    ldout(cct, 3) << " accept_cloexec failed " << " errno:  "<<  errno  << dendl;
      return -errno;
    }
  
-+  if ((cur_connect_count > certParam.maxConnect) && (certParam.tlsStatus == 1)) {
-+    // TODO: error log
-+    // g_connect_count--;
-+    ::close(sd);
-+    lock_dec_connect();
-+    ldout(cct, 3) << " connection num reaches the maximum  count:  " <<  g_connect_count  <<dendl;
-+    return -EINTR;
-+  }
-+
    int r = handler.set_nonblock(sd);
    if (r < 0) {
      ::close(sd);
-+    // g_connect_count--;
-+    lock_dec_connect();
-+    ldout(cct, 3) << " set_nonblock failed  count:  " <<  g_connect_count <<dendl;
++    ldout(cct, 3) << " set_nonblock failed " <<dendl;
      return -errno;
    }
  
    r = handler.set_socket_options(sd, opt.nodelay, opt.rcbuf_size);
    if (r < 0) {
      ::close(sd);
-+    // g_connect_count--;
-+    lock_dec_connect();
-+    ldout(cct, 3) << " set_socket_options failed  count:  " <<  g_connect_count <<dendl;
++    ldout(cct, 3) << " set_socket_options failed " <<dendl;
      return -errno;
    }
  
-@@ -212,17 +498,51 @@ int PosixServerSocketImpl::accept(ConnectedSocket *sock, const SocketOptions &op
+@@ -212,15 +467,49 @@ int PosixServerSocketImpl::accept(ConnectedSocket *sock, const SocketOptions &op
  
    out->set_type(addr_type);
    out->set_sockaddr((sockaddr*)&ss);
@@ -431,22 +400,26 @@ index e9c8d40..0dc8607 100644
  
 -  std::unique_ptr<PosixConnectedSocketImpl> csi(new PosixConnectedSocketImpl(handler, *out, sd, true));
 -  *sock = ConnectedSocket(std::move(csi));
+-  return 0;
+-}
++  if (certParamInit(&certParam) != 0) {
++    lderr(cct) << " cert param init failed" << " abort" << dendl;
++    ceph_abort();
++  }
+ 
+-void PosixWorker::initialize()
+-{
 +  if ((certParam.tlsStatus == 1) && (local_addr.get_port() >= 7880 && local_addr.get_port() <= 7889)) {
 +    SSL *sslNew = SSL_new(ctx);
 +    if (sslNew == nullptr) {
-+      // g_connect_count--;
 +      ::close(sd);
-+      lock_dec_connect();
 +      lderr(cct) << __func__ << " ssl nullptr " << dendl;
 +      return -errno;
 +    }
 +    ldout(cct, 3) << __func__ << " TLS accept fd:  " << sd << " port: " <<  local_addr.get_port() << "  SSL Version: "  <<  SSL_get_version(sslNew)  <<dendl;
 +    if (SSL_set_fd(sslNew, sd) <= 0) {
 +      lderr(cct) << __func__ << " ctx set fd failed "  << dendl;
-+      ldout(cct, 3) << " ctx set fd failed  count:  " <<  g_connect_count <<dendl;
-+      // g_connect_count--;
 +      ::close(sd);
-+      lock_dec_connect();
 +      SSL_free(sslNew);
 +      return -errno;
 +    }
@@ -454,26 +427,20 @@ index e9c8d40..0dc8607 100644
 +    bool is_handShaked = false;
 +    if (ret > 0) {
 +      is_handShaked = true;
-+      ldout(cct, 3) << "ssl accept success fd: " <<  sd  << "connect port: "  << local_addr.get_port() << dendl;
++      ldout(cct, 3) << "ssl accept success fd: " <<  sd  << " connect port: "  << local_addr.get_port() << dendl;
 +    }
 +    std::unique_ptr<TlsPosixConnectedSocketImpl> csi(new TlsPosixConnectedSocketImpl(handler, *out, sd, true, sslNew, true, cct, is_handShaked));
 +    *sock = ConnectedSocket(std::move(csi));
 +  } else {
-+    ldout(cct, 3) << " TCP accept success  "<< " count:  " <<  g_connect_count  <<  "fd: " <<  sd  <<dendl;
++    ldout(cct, 3) << " TCP accept success  "<< "fd: " <<  sd  <<dendl;
 +    std::unique_ptr<PosixConnectedSocketImpl> csi(new PosixConnectedSocketImpl(handler, *out, sd, true));
 +    *sock = ConnectedSocket(std::move(csi));
 +  }
-   return 0;
++  return 0;
  }
  
--void PosixWorker::initialize()
--{
--}
--
  int PosixWorker::listen(entity_addr_t &sa,
- 			unsigned addr_slot,
- 			const SocketOptions &opt,
-@@ -232,7 +552,6 @@ int PosixWorker::listen(entity_addr_t &sa,
+@@ -232,7 +521,6 @@ int PosixWorker::listen(entity_addr_t &sa,
    if (listen_sd < 0) {
      return -errno;
    }
@@ -481,7 +448,7 @@ index e9c8d40..0dc8607 100644
    int r = net.set_nonblock(listen_sd);
    if (r < 0) {
      ::close(listen_sd);
-@@ -248,7 +567,7 @@ int PosixWorker::listen(entity_addr_t &sa,
+@@ -248,7 +536,7 @@ int PosixWorker::listen(entity_addr_t &sa,
    r = ::bind(listen_sd, sa.get_sockaddr(), sa.get_sockaddr_len());
    if (r < 0) {
      r = -errno;
@@ -490,7 +457,7 @@ index e9c8d40..0dc8607 100644
                     << ": " << cpp_strerror(r) << dendl;
      ::close(listen_sd);
      return r;
-@@ -264,13 +583,12 @@ int PosixWorker::listen(entity_addr_t &sa,
+@@ -264,13 +552,12 @@ int PosixWorker::listen(entity_addr_t &sa,
  
    *sock = ServerSocket(
            std::unique_ptr<PosixServerSocketImpl>(
@@ -505,13 +472,13 @@ index e9c8d40..0dc8607 100644
    if (opts.nonblock) {
      sd = net.nonblock_connect(addr, opts.connect_bind_addr);
    } else {
-@@ -282,8 +600,32 @@ int PosixWorker::connect(const entity_addr_t &addr, const SocketOptions &opts, C
+@@ -282,8 +569,34 @@ int PosixWorker::connect(const entity_addr_t &addr, const SocketOptions &opts, C
    }
  
    net.set_priority(sd, opts.priority, addr.get_family());
 -  *socket = ConnectedSocket(
 +
-+  ldout(cct, 3) << "fd:" <<  sd  << "connect port: "  << addr.get_port() << " tlsStatus " << tlsParam.tlsStatus << dendl;
++  ldout(cct, 3) << "fd:" <<  sd  << " connect port: "  << addr.get_port() << " tlsStatus " << tlsParam.tlsStatus << dendl;
 +  if ((tlsParam.tlsStatus == 1) && (addr.get_port() >= tlsParam.portIdStart && addr.get_port() <= tlsParam.portIdEnd)) {
 +    SSL *sslNew = SSL_new(ctx);
 +    if (sslNew == nullptr) {
@@ -528,6 +495,8 @@ index e9c8d40..0dc8607 100644
 +    if (ret > 0) {
 +      is_handShaked = true;
 +      ldout(cct, 3) << "ssl connect success fd: " <<  sd  << "connect port: "  << addr.get_port() << dendl;
++    } else {
++      ldout(cct, 3) << "ssl connect skip fd=" << sd << " headshake=" << is_handShaked << dendl;
 +    }
 +
 +    *socket = ConnectedSocket(
@@ -578,10 +547,10 @@ index f1aaccd..0a240b2 100644
  	     unsigned addr_slot,
  	     const SocketOptions &opt,
 diff --git a/src/msg/async/Stack.cc b/src/msg/async/Stack.cc
-index 8976c3c..e071ca7 100644
+index 8976c3c..7f7185d 100644
 --- a/src/msg/async/Stack.cc
 +++ b/src/msg/async/Stack.cc
-@@ -29,11 +29,14 @@
+@@ -29,6 +29,7 @@
  
  #include "common/dout.h"
  #include "include/ceph_assert.h"
@@ -589,14 +558,7 @@ index 8976c3c..e071ca7 100644
  
  #define dout_subsys ceph_subsys_ms
  #undef dout_prefix
- #define dout_prefix *_dout << "stack "
- 
-+extern int g_connect_count;
-+
- std::function<void ()> NetworkStack::add_thread(unsigned i)
- {
-   Worker *w = workers[i];
-@@ -82,10 +85,10 @@ std::shared_ptr<NetworkStack> NetworkStack::create(CephContext *c, const string
+@@ -82,10 +83,10 @@ std::shared_ptr<NetworkStack> NetworkStack::create(CephContext *c, const string
    return nullptr;
  }
  
@@ -609,7 +571,7 @@ index 8976c3c..e071ca7 100644
  #ifdef HAVE_RDMA
    else if (type == "rdma")
      return new RDMAWorker(c, i);
-@@ -105,6 +108,21 @@ NetworkStack::NetworkStack(CephContext *c, const string &t): type(t), started(fa
+@@ -105,6 +106,31 @@ NetworkStack::NetworkStack(CephContext *c, const string &t): type(t), started(fa
  {
    ceph_assert(cct->_conf->ms_async_op_threads > 0);
  
@@ -618,20 +580,30 @@ index 8976c3c..e071ca7 100644
 +    lderr(cct) << __func__ << " tlsParam init failed "  << dendl;
 +  }
 +  ldout(cct, 3) << __func__ << " tlsParam init success "  << dendl;
-+  g_connect_count = 0;
 +  if (tlsParam.tlsStatus == 1) {
++    if (checkCertTask(&tlsParam) != 0) {
++      printf("check cert failed, exit\n");
++      lderr(cct) << __func__ << " check cert failed "  << dendl;
++      exit(1);
++    }
 +    if (sslctxInit(&tlsParam, &ctx) != 0) {
 +      printf("ctx init failed, exit\n");
 +      lderr(cct) << __func__ << " ctx init failed "  << dendl;
 +      exit(1);
 +    }
++    if (backgroundCertMonitorInit(&tlsParam) != 0) {
++      printf("init cert monitor thread failed, exit\n");
++      lderr(cct) << __func__ << " init cert monitor thread failed "  << dendl;
++    }
++    SSL_CTX_set_mode(ctx, SSL_MODE_ENABLE_PARTIAL_WRITE);
++    SSL_CTX_set_mode(ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
 +    ldout(cct, 3) << __func__ << " ctx init success "  << dendl;
 +  }
 +
    const int InitEventNumber = 5000;
    num_workers = cct->_conf->ms_async_op_threads;
    if (num_workers >= EventCenter::MAX_EVENTCENTER) {
-@@ -116,7 +134,7 @@ NetworkStack::NetworkStack(CephContext *c, const string &t): type(t), started(fa
+@@ -116,7 +142,7 @@ NetworkStack::NetworkStack(CephContext *c, const string &t): type(t), started(fa
    }
  
    for (unsigned i = 0; i < num_workers; ++i) {
@@ -684,10 +656,10 @@ index a093dad..45415b1 100644
    // backend need to override this method if backend doesn't support shared
 diff --git a/src/msg/async/cert_ceph.h b/src/msg/async/cert_ceph.h
 new file mode 100644
-index 0000000..07ddbd3
+index 0000000..a60ea0a
 --- /dev/null
 +++ b/src/msg/async/cert_ceph.h
-@@ -0,0 +1,60 @@
+@@ -0,0 +1,62 @@
 +/*
 +Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
 +
@@ -739,7 +711,9 @@ index 0000000..07ddbd3
 +} certParam_t;
 +
 +int32_t certParamInit(certParam_t *param);
++int32_t checkCertTask(certParam_t *param);
 +int32_t sslctxInit(certParam_t *param, SSL_CTX **ctx);
++int32_t backgroundCertMonitorInit(certParam_t *param);
 +
 +#define MAX_CONNECT_COUNT 40960
 +

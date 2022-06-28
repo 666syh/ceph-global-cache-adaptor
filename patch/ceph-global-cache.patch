@@ -40,7 +40,7 @@ index 28ec983..bf4aa6e 100644
  if(WITH_TESTS)
 diff --git a/src/client_adaptor/CMakeLists.txt b/src/client_adaptor/CMakeLists.txt
 new file mode 100644
-index 0000000..9cf71f1
+index 0000000..aba70f7
 --- /dev/null
 +++ b/src/client_adaptor/CMakeLists.txt
 @@ -0,0 +1,17 @@
@@ -53,7 +53,7 @@ index 0000000..9cf71f1
 +
 +add_library(ceph_client_adaptor_plugin SHARED ${client_adaptor_srcs})
 +message(STATUS "In cliend adaptor third part directory --> " ${third_part_dir})
-+target_link_libraries(ceph_client_adaptor_plugin osdc ccm_lib das upf ftdsclient dptracepoint dif alarm)
++target_link_libraries(ceph_client_adaptor_plugin osdc agent_client_lib das)
 +
 +
 +set(client_adaptor_dir ${CEPH_INSTALL_PKGLIBDIR})
@@ -63,10 +63,10 @@ index 0000000..9cf71f1
 +
 diff --git a/src/client_adaptor/ClientAdaptorMgr.cc b/src/client_adaptor/ClientAdaptorMgr.cc
 new file mode 100644
-index 0000000..8de6e67
+index 0000000..5f9f661
 --- /dev/null
 +++ b/src/client_adaptor/ClientAdaptorMgr.cc
-@@ -0,0 +1,197 @@
+@@ -0,0 +1,223 @@
 +/* License:LGPL-2.1
 +*
 +* Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
@@ -108,12 +108,33 @@ index 0000000..8de6e67
 +    return RET_OK;
 +}
 +
++int32_t CcmNodeChangeNotify(NodeInfo *nodeList, uint32_t nodeNum, void *ctx) {
++    if (nodeNum == 0) {
++        return RET_OK;
++    }
++    std::set<uint32_t> available_nodes;
++    for (uint32_t i = 0; i < nodeNum; i++) {
++        if (nodeList[i].state == NODE_STATE_UP) {
++            available_nodes.insert(nodeList[i].nodeId);
++        }
++    }
++    if (nodeNum - available_nodes.size() == 0) {
++        return RET_OK;
++    }
++    Objecter *obj = static_cast<Objecter *>(ctx);
++    obj->nodeview_change_retry_op_submit(available_nodes);
++    return RET_OK;
++}
++
 +void ClientAdaptorCcm::ccm_deregister(Objecter *obj)
 +{
 +    if (register_objs.count(obj) > 0) {
 +        OpenDeregisterViewChangeNotifyChain(register_objs[obj]);
++        OpenDeregisterNodeViewChangeNotifyChain(register_node_change_objs[obj]);
 +        delete register_objs[obj];
++        delete register_node_change_objs[obj];
 +        register_objs.erase(obj);
++        register_node_change_objs.erase(obj);
 +    }
 +    if (register_objs.empty() && is_init_succeed()) {
 +        set_init_flag(false);
@@ -123,10 +144,14 @@ index 0000000..8de6e67
 +bool ClientAdaptorCcm::ccm_callback_register(Objecter *obj)
 +{
 +    PTViewChangeOpHandle *ccmCallback = new PTViewChangeOpHandle();
++    NodeViewChangeOpHandle *ccmNodeChangeCallback = new NodeViewChangeOpHandle();
 +    register_objs[obj] = ccmCallback;
++    register_node_change_objs[obj] = ccmNodeChangeCallback;
 +    ccmCallback->notifyPtChange = CcmPtChangeNotify;
++    ccmNodeChangeCallback->notifyNodeChange = CcmNodeChangeNotify;
 +    ccmCallback->ctx = (void *)obj;
-+    if (OpenRegisterViewChangeNotifyChain(ccmCallback, CCM_MODULE_CLIENT)) {
++    ccmNodeChangeCallback->ctx = (void *)obj;
++    if (OpenRegisterViewChangeNotifyChain(ccmCallback, CCM_MODULE_CLIENT) || OpenRegisterNodeViewChangeNotifyChain(ccmNodeChangeCallback, CCM_MODULE_CLIENT)) {
 +        std::cout << __func__ << " Client Adaptor: CCM agent register failed" << std::endl;
 +        return false;
 +    }
@@ -156,6 +181,7 @@ index 0000000..8de6e67
 +
 +        steady_clock::time_point end = steady_clock::now();
 +        seconds time_span = duration_cast<seconds>(end - begin);
++
 +        if (time_span > timeout) {
 +            std::cout << __func__ << " Client Adaptor: CCM agent init failed because of timeout"
 +                                  << ", timeout=" << timeout << std::endl;
@@ -167,7 +193,6 @@ index 0000000..8de6e67
 +        std::cout << __func__ << " Client Adaptor: CCM agent init failed" << std::endl;
 +	    return RET_CCM_AGENT_INIT_ERROR;
 +    }
-+
 +    if (!ccm_callback_register(obj)){
 +    	return RET_CCM_REGISTER_ERROR;
 +    }
@@ -231,9 +256,9 @@ index 0000000..8de6e67
 +    return ret;
 +}
 +
-+int32_t ClientAdaptorCcm::add_snap_to_gc(const int64_t pool_id,
-+                                          const std::string &image_id,
-+                                          const uint64_t snap_id) {
++int32_t ClientAdaptorCcm::add_snap_to_gc(int64_t pool_id,
++                                         const std::string &image_id,
++                                         const uint64_t snap_id) {
 +    int32_t ret = OpenCreateSnapshot(pool_id, image_id.c_str(), snap_id);
 +    if (ret < 0) {
 +        std::cout << __func__ << " Client Adaptor: Add to gc failed, snap_id=" << snap_id
@@ -243,20 +268,21 @@ index 0000000..8de6e67
 +    return 0;
 +}
 +
-+int32_t ClientAdaptorCcm::remove_snap_from_gc(const int64_t pool_id,
-+                                          const std::string &image_id,
-+                                          const uint64_t snap_id) {
-+    int32_t ret = OpenDeleteSnapshot(pool_id, image_id.c_str(), snap_id);
++int32_t ClientAdaptorCcm::remove_snap_from_gc(int64_t pool_id,
++                                              const std::string &name_space,
++                                              const std::string &image_id,
++                                              uint64_t snap_id) {
++    int32_t ret = OpenDeleteSnapshot(pool_id, name_space.c_str(), image_id.c_str(), snap_id);
 +    if (ret < 0) {
-+        std::cout << __func__ << " Client Adaptor: Remove from gc failed, snap_id=" << snap_id
-+                 << " ret="<< ret << std::endl;
++        std::cout << __func__ << " Client Adaptor: Remove from gc failed, snap_name=" << pool_id << "/" << image_id
++                 << "@" << snap_id << " ret="<< ret << std::endl;
 +        return ret;
 +    }
 +    return 0;
 +}
 +
-+int32_t ClientAdaptorCcm::remove_gc_image_resource(const int64_t pool_id, const std::string image_id) {
-+    int32_t ret = 0;//OpenReleaseImageResource(pool_id, image_id.c_str());
++int32_t ClientAdaptorCcm::remove_gc_image_resource(int64_t pool_id, const std::string image_id) {
++    int32_t ret = OpenReleaseImageResource(pool_id, image_id.c_str());
 +    if (ret < 0) {
 +        std::cout << __func__ << " Client Adaptor: Remove image resource failed, image_id=" << image_id
 +                 << " ret="<< ret << std::endl;
@@ -267,10 +293,10 @@ index 0000000..8de6e67
 \ No newline at end of file
 diff --git a/src/client_adaptor/ClientAdaptorMgr.h b/src/client_adaptor/ClientAdaptorMgr.h
 new file mode 100644
-index 0000000..387856a
+index 0000000..f7ca078
 --- /dev/null
 +++ b/src/client_adaptor/ClientAdaptorMgr.h
-@@ -0,0 +1,146 @@
+@@ -0,0 +1,150 @@
 +/* License:LGPL-2.1
 +*
 +* Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
@@ -317,7 +343,8 @@ index 0000000..387856a
 +
 +  virtual int32_t add_snap_to_gc(const int64_t pool_id, const std::string &image_id, const uint64_t snap_id) = 0;
 +
-+  virtual int32_t remove_snap_from_gc(const int64_t pool_id, const std::string &image_id, const uint64_t snap_id) = 0;
++  virtual int32_t remove_snap_from_gc(const int64_t pool_id, const std::string &name_space,
++                                    const std::string &image_id, uint64_t snap_id) = 0;
 +
 +  virtual int32_t remove_gc_image_resource(const int64_t pool_id, const std::string image_id) = 0;
 +
@@ -350,7 +377,8 @@ index 0000000..387856a
 +
 +  int32_t add_snap_to_gc(const int64_t pool_id, const std::string &image_id, const uint64_t snap_id);
 +
-+  int32_t remove_snap_from_gc(const int64_t pool_id, const std::string &image_id, const uint64_t snap_id);
++  int32_t remove_snap_from_gc(const int64_t pool_id, const std::string &name_space,
++                            const std::string &image_id, uint64_t snap_id);
 +
 +  int32_t remove_gc_image_resource(const int64_t pool_id, const std::string image_id);
 +
@@ -363,6 +391,7 @@ index 0000000..387856a
 +
 +private:
 +  std::map<Objecter*, PTViewChangeOpHandle* > register_objs;
++  std::map<Objecter*, NodeViewChangeOpHandle* > register_node_change_objs;
 +  bool ccm_callback_register(Objecter *obj);
 +}; 
 +
@@ -381,7 +410,7 @@ index 0000000..387856a
 +  }
 +  
 +  int32_t get_pt_entry(uint32_t pt_index, PTViewPtEntry* entry){
-+    entry->masterNode = pt_index % 3;
++    entry->curNodeInfo.nodeId = pt_index % 3;
 +    return 0;
 +  }
 +
@@ -396,7 +425,8 @@ index 0000000..387856a
 +    return 0;
 +  }
 +
-+  int32_t remove_snap_from_gc(const int64_t pool_id, const std::string &image_id, const uint64_t snap_id)  {
++  int32_t remove_snap_from_gc(const int64_t pool_id, const std::string &name_space,
++                            const std::string &image_id, uint64_t snap_id)  {
 +    return 0;
 +  }
 +
@@ -419,10 +449,10 @@ index 0000000..387856a
 +#endif
 diff --git a/src/client_adaptor/ClientAdaptorMsg.cc b/src/client_adaptor/ClientAdaptorMsg.cc
 new file mode 100644
-index 0000000..001397c
+index 0000000..009901b
 --- /dev/null
 +++ b/src/client_adaptor/ClientAdaptorMsg.cc
-@@ -0,0 +1,288 @@
+@@ -0,0 +1,287 @@
 +/* License:LGPL-2.1
 +*
 +* Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
@@ -490,7 +520,6 @@ index 0000000..001397c
 + * null termination).
 + */
 +bool ClientAdaptorMsg::filter_msg(Objecter::op_target_t *t){
-+
 +  string obj_name = t->base_oid.name;	
 +  if (obj_name.size() < RBD_DATA_OBJECT_NAME_LEN) {
 +    return false;
@@ -547,12 +576,12 @@ index 0000000..001397c
 +    std::cout << __func__ << " Client Adaptor: Get PT entry failed" << std::endl;
 +    return -RET_CCM_PT_ENTRY_ERROR;
 +  }
-+  uint32_t node_id = pt_entry.peerGroup[0].nodeID << NODE_ID_OFFSET_BIT;
++  uint32_t node_id = pt_entry.curNodeInfo.nodeId << NODE_ID_OFFSET_BIT;
 +  node_id += 0x1 << FLAG_OFFSET_BIT;
 +  pool_id |= pt_entry.birthVersion << 32;
 +
-+  if (mgr_ref->get_node_info(pt_entry.peerGroup[0].nodeID, &info)){
-+    std::cout << __func__ << " Client Adaptor: Get node info failed. node id " << pt_entry.peerGroup[0].nodeID << std::endl;
++  if (mgr_ref->get_node_info(pt_entry.curNodeInfo.nodeId, &info)){
++    std::cout << __func__ << " Client Adaptor: Get node info failed. node id " << pt_entry.curNodeInfo.nodeId  << std::endl;
 +    return -RET_CCM_NODE_INFO_ERROR;
 +  }
 +  if (info.portNum > PORT_SUPPORT_MAX || info.portNum == 0) {
@@ -1044,10 +1073,10 @@ index 0000000..fa7d71d
 +#endif
 diff --git a/src/client_adaptor/open_ccm.h b/src/client_adaptor/open_ccm.h
 new file mode 100644
-index 0000000..3b43900
+index 0000000..040c50d
 --- /dev/null
 +++ b/src/client_adaptor/open_ccm.h
-@@ -0,0 +1,431 @@
+@@ -0,0 +1,447 @@
 +/* 
 + * Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
 +
@@ -1105,6 +1134,10 @@ index 0000000..3b43900
 +#define ZK_DISK_NAME_LEN      (64)
 +#define ZK_DISK_SN_LEN        (64)
 +
++#define CCM_VERSION_0 0
++#define CCM_VERSION_1 1
++#define CCM_CURRENT_VERSION CCM_VERSION_0
++#define CCM_Upgrade_Embedding_LEN 64
 +
 +typedef enum {
 +    NODE_STATE_INVALID  = 0,
@@ -1166,6 +1199,7 @@ index 0000000..3b43900
 +    uint32_t capacity;
 +    uint32_t usedCap;
 +    VdiskState state;
++    bool isFirstFormat;
 +} VdiskInfo;
 +
 +typedef struct {
@@ -1180,6 +1214,8 @@ index 0000000..3b43900
 +    uint32_t diskNum;
 +    VdiskInfo diskList[MAX_DISK_NUM_PER_NODE];
 +    uint64_t version;
++    NodeState inOutState;
++    NodeState runningState;
 +} NodeInfo;
 +
 +/* ClusterInfo */
@@ -1313,23 +1349,28 @@ index 0000000..3b43900
 +} PtSrcNodeInfo;
 +
 +typedef struct {
++    uint32_t nodeId;
++    uint32_t diskId;
++    uint32_t vnodeId;
++} PtNodeInfo;
++
++typedef struct {
++    uint32_t version;
 +    bool ptChange;
 +    uint32_t birthVersion;
 +    uint32_t ptId;
 +    uint32_t indexInNode;
-+    uint32_t masterNode;
 +    PtState state;
-+    SplitState splitState;
-+    bool isRecoverd;
-+    PtPeerInfo peerGroup[2];
-+    PtPeerInfo targetPeerGroup[2];
-+    PtSrcNodeInfo srcNodeInfo;
++    PtNodeInfo curNodeInfo;
++    PtNodeInfo srcNodeInfo;
++    char reserved[CCM_Upgrade_Embedding_LEN];
 +} PtInfo;
 +
 +typedef struct _PtView {
++    uint32_t version;
 +    uint32_t globalVersion;
 +    uint32_t ptNum;
-+    uint8_t reserve[8];
++    char reserved[CCM_Upgrade_Embedding_LEN];
 +    PtInfo ptInfo[0];
 +} PtView;
 +
@@ -1466,11 +1507,15 @@ index 0000000..3b43900
 +
 +int32_t OpenRegisterViewChangeNotifyChain(PTViewChangeOpHandle *handle, uint8_t type);
 +
++int32_t OpenRegisterNodeViewChangeNotifyChain(NodeViewChangeOpHandle *handle, uint8_t type);
++
 +void OpenDeregisterViewChangeNotifyChain(PTViewChangeOpHandle *handle);
++
++void OpenDeregisterNodeViewChangeNotifyChain(NodeViewChangeOpHandle *handle);
 +
 +int32_t OpenCreateSnapshot(const int64_t poolId, const char *imageId, const uint64_t snapId);
 +
-+int32_t OpenDeleteSnapshot(const int64_t poolId, const char *imageId, const uint64_t snapId);
++int32_t OpenDeleteSnapshot(int64_t poolId, const char *nameSpace, const char *imageId, uint64_t snapId);
 +
 +int32_t OpenReleaseImageResource(const int64_t poolId, const char *imageId);
 +
@@ -1833,6 +1878,70 @@ index 98d5976..b92af2d 100644
    void finish(int r);
  };
  
+diff --git a/src/librbd/internal.cc b/src/librbd/internal.cc
+index 89b538d..e875b7d 100644
+--- a/src/librbd/internal.cc
++++ b/src/librbd/internal.cc
+@@ -56,6 +56,11 @@
+ #include <boost/variant.hpp>
+ #include "include/ceph_assert.h"
+ 
++#ifdef WITH_GLOBAL_CACHE
++#include "client_adaptor/ClientAdaptorPlugin.h"
++#include "client_adaptor/ClientAdaptorMgr.h"
++#endif
++
+ #define dout_subsys ceph_subsys_rbd
+ #undef dout_prefix
+ #define dout_prefix *_dout << "librbd: "
+@@ -1280,6 +1285,47 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
+       }
+     }
+ 
++#ifdef WITH_GLOBAL_CACHE
++  if (is_protected) {
++      lderr(ictx->cct) << "snapshot is protected" << dendl;
++      return -EBUSY;
++  }
++  if (ictx->operations_disabled || ictx->read_only) {
++      return -EROFS;
++  }
++  ictx->snap_lock.get_read();
++  uint64_t snap_id = ictx->get_snap_id(cls::rbd::UserSnapshotNamespace(), snap_name);
++  ictx->snap_lock.put_read();
++  ceph_assert(snap_id != CEPH_NOSNAP);
++  PluginRegistry *reg = ictx->cct->get_plugin_registry();
++  auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
++  int mgr_ret = -ELIBACC;
++
++  if (plugin && plugin->mgr_ref) {
++      int64_t pool_id = ictx->md_ctx.get_id();
++      string name_space = ictx->md_ctx.get_namespace();
++      mgr_ret = plugin->mgr_ref->remove_snap_from_gc(pool_id, name_space, ictx->id, snap_id);
++      if (mgr_ret < 0) {
++          lderr(ictx->cct) << " " << __func__ << "remove snap failed, agent return " << mgr_ret << dendl;
++      } else {
++          bool exist = false;
++          do {
++            if (exist) {
++                ldout(ictx->cct, 20) << "snap still exists snap_name= " << snap_name << dendl;
++                usleep(500000);   // 0.5s
++            }
++            mgr_ret = snap_exists(ictx, cls::rbd::UserSnapshotNamespace(), snap_name, &exist);
++            if (mgr_ret < 0) {
++                lderr(ictx->cct) << " " << __func__ << ": refresh failed, ret=" << mgr_ret << dendl;
++            }
++          } while(exist);
++      }
++  } else {
++      lderr(ictx->cct) << " " << __func__ << ": load plugin failed! plugin=" << plugin << dendl;
++  }
++  return mgr_ret;
++#endif
++
+     C_SaferCond ctx;
+     ictx->operations->snap_remove(cls::rbd::UserSnapshotNamespace(), snap_name, &ctx);
+ 
 diff --git a/src/librbd/io/ImageDispatchSpec.h b/src/librbd/io/ImageDispatchSpec.h
 index 93c53a0..7551fb0 100644
 --- a/src/librbd/io/ImageDispatchSpec.h
@@ -1912,7 +2021,7 @@ index 34f2c2c..cae0341 100644
    ThreadPool::PointerWQ<ImageDispatchSpec<I> >::queue(req);
  }
 diff --git a/src/librbd/operation/SnapshotCreateRequest.cc b/src/librbd/operation/SnapshotCreateRequest.cc
-index 6629360..ba441b7 100644
+index 6629360..dd3ddeb 100644
 --- a/src/librbd/operation/SnapshotCreateRequest.cc
 +++ b/src/librbd/operation/SnapshotCreateRequest.cc
 @@ -11,6 +11,11 @@
@@ -1935,7 +2044,7 @@ index 6629360..ba441b7 100644
 +  PluginRegistry *reg = cct->get_plugin_registry();
 +  auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
 +  if (plugin == NULL) {
-+      lderr(cct) << "client adaptor plugin not found" << dendl;
++      lderr(cct) << "client adaptor plugin not loaded" << dendl;
 +      this->async_complete(-ELIBACC);
 +      return;
 +  }
@@ -2119,121 +2228,6 @@ index 406d2f0..5d1dfdd 100644
 +
    void send_release_snap_id();
    Context *handle_release_snap_id(int *result);
- 
-diff --git a/src/librbd/operation/SnapshotRemoveRequest.cc b/src/librbd/operation/SnapshotRemoveRequest.cc
-index 69fbc3e..a9cba36 100644
---- a/src/librbd/operation/SnapshotRemoveRequest.cc
-+++ b/src/librbd/operation/SnapshotRemoveRequest.cc
-@@ -11,6 +11,11 @@
- #include "librbd/Utils.h"
- #include "librbd/image/DetachChildRequest.h"
- 
-+#ifdef WITH_GLOBAL_CACHE
-+#include "client_adaptor/ClientAdaptorPlugin.h"
-+#include "client_adaptor/ClientAdaptorMgr.h"
-+#endif
-+
- #define dout_subsys ceph_subsys_rbd
- #undef dout_prefix
- #define dout_prefix *_dout << "librbd::SnapshotRemoveRequest: " << this << " " \
-@@ -47,6 +52,16 @@ void SnapshotRemoveRequest<I>::send_op() {
-     }
-   }
- 
-+#ifdef WITH_GLOBAL_CACHE
-+  PluginRegistry *reg = cct->get_plugin_registry();
-+  auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
-+  if (plugin == NULL) {
-+    lderr(cct) << "client adaptor plugin not loaded" << dendl;
-+    this->async_complete(-ELIBACC);
-+    return;
-+  }
-+#endif
-+
-   trash_snap();
- }
- 
-@@ -423,9 +438,56 @@ void SnapshotRemoveRequest<I>::handle_remove_snap(int r) {
-     return;
-   }
- 
-+#ifdef WITH_GLOBAL_CACHE
-+  int32_t ret = remove_snap_from_gc();
-+#endif
-   remove_snap_context();
-+#ifdef WITH_GLOBAL_CACHE
-+  this->complete(ret);
-+#else
-   this->complete(0);
-+#endif
-+}
-+
-+#ifdef WITH_GLOBAL_CACHE
-+template <typename I>
-+int32_t SnapshotRemoveRequest<I>::remove_snap_from_gc() {
-+  I &image_ctx = this->m_image_ctx;
-+  int64_t pool_id = image_ctx.md_ctx.get_id();
-+  std::string pool_name;
-+  CephContext *cct = image_ctx.cct;
-+  ldout(cct, 10) << this << " Client Adaptor: " << __func__
-+                                                  << " pool_id: " << pool_id
-+                                                  << " image_id: " << image_ctx.id
-+                                                  << " snap_id: " << m_snap_id
-+                                                  << dendl;
-+
-+  librados::Rados rados(image_ctx.md_ctx);
-+  int ret = rados.pool_reverse_lookup(pool_id, &pool_name);
-+  ceph_assert(ret == 0 && !pool_name.empty());
-+
-+  ldout(cct, 10) << this << " Client Adaptor: " << __func__
-+                                                 << " pool_name: " << pool_name
-+                                                 << " image_name: " << image_ctx.name
-+                                                 << " snap_name: " << m_snap_name
-+                                                 << dendl;
-+  
-+  PluginRegistry *reg = cct->get_plugin_registry();
-+  auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
-+  int mgr_ret = -ELIBACC;
-+
-+  if (plugin && plugin->mgr_ref) {
-+      mgr_ret = plugin->mgr_ref->remove_snap_from_gc(pool_id, image_ctx.id, m_snap_id);
-+  }
-+
-+  if (mgr_ret < 0) {
-+      lderr(cct) << " Client Adaptor: " << "gc remove snapshot fail, ret=" << mgr_ret << dendl;
-+  } else {
-+      ldout(cct, 20) << " Client Adaptor: " << "gc remove snapshot success" << dendl;
-+  }
-+  return mgr_ret;
- }
-+#endif
- 
- template <typename I>
- void SnapshotRemoveRequest<I>::remove_snap_context() {
-diff --git a/src/librbd/operation/SnapshotRemoveRequest.h b/src/librbd/operation/SnapshotRemoveRequest.h
-index a47bbc0..7bab65d 100644
---- a/src/librbd/operation/SnapshotRemoveRequest.h
-+++ b/src/librbd/operation/SnapshotRemoveRequest.h
-@@ -49,6 +49,9 @@ public:
-    *    v (skip if in-use)
-    * REMOVE_SNAP
-    *    |
-+   *    v (skip if no gc)
-+   * REMOVE_SNAP_FROM_GC
-+   *    |
-    *    v
-    * <finish>
-    *
-@@ -109,6 +112,10 @@ private:
-   void remove_snap();
-   void handle_remove_snap(int r);
- 
-+#ifdef WITH_GLOBAL_CACHE
-+  int32_t remove_snap_from_gc();
-+#endif
-+
-   void remove_snap_context();
-   int scan_for_parents(cls::rbd::ParentImageSpec &pspec);
  
 diff --git a/src/msg/Message.cc b/src/msg/Message.cc
 index d36a95e..e5384c3 100644
@@ -2478,7 +2472,7 @@ index 4b03f5e..d5211fa 100644
    session_stream_handlers = \
      ceph::crypto::onwire::rxtx_t::create_handler_pair(cct, *auth_meta, false);
 diff --git a/src/osdc/Objecter.cc b/src/osdc/Objecter.cc
-index bc39114..f753045 100644
+index bc39114..7cc4ed7 100644
 --- a/src/osdc/Objecter.cc
 +++ b/src/osdc/Objecter.cc
 @@ -51,6 +51,18 @@
@@ -2500,13 +2494,12 @@ index bc39114..f753045 100644
  using ceph::real_time;
  using ceph::real_clock;
  
-@@ -73,7 +85,12 @@ enum {
+@@ -73,7 +85,11 @@ enum {
    l_osdc_op_send_bytes,
    l_osdc_op_resend,
    l_osdc_op_reply,
 -
 +#ifdef WITH_GLOBAL_CACHE
-+  l_osdc_op_gc_active,
 +  l_osdc_op_gc_retry,
 +  l_osdc_op_gc_hangon,
 +  l_osdc_op_gc_resend,
@@ -2514,7 +2507,7 @@ index bc39114..f753045 100644
    l_osdc_op,
    l_osdc_op_r,
    l_osdc_op_w,
-@@ -236,6 +253,30 @@ void Objecter::init()
+@@ -236,6 +252,30 @@ void Objecter::init()
  {
    ceph_assert(!initialized);
  
@@ -2545,13 +2538,11 @@ index bc39114..f753045 100644
    if (!logger) {
      PerfCountersBuilder pcb(cct, "objecter", l_osdc_first, l_osdc_last);
  
-@@ -246,6 +287,16 @@ void Objecter::init()
+@@ -246,6 +286,14 @@ void Objecter::init()
      pcb.add_u64_counter(l_osdc_op_send_bytes, "op_send_bytes", "Sent data", NULL, 0, unit_t(UNIT_BYTES));
      pcb.add_u64_counter(l_osdc_op_resend, "op_resend", "Resent operations");
      pcb.add_u64_counter(l_osdc_op_reply, "op_reply", "Operation reply");
 +#ifdef WITH_GLOBAL_CACHE
-+    pcb.add_u64_counter(l_osdc_op_gc_active, "op_gc_active",
-+            "Operation being sent to gc ");
 +    pcb.add_u64_counter(l_osdc_op_gc_resend, "op_gc_resend",
 +            "Operation being resent to gc");
 +    pcb.add_u64_counter(l_osdc_op_gc_retry, "op_gc_retry",
@@ -2562,7 +2553,7 @@ index bc39114..f753045 100644
  
      pcb.add_u64_counter(l_osdc_op, "op", "Operations");
      pcb.add_u64_counter(l_osdc_op_r, "op_r", "Read operations", "rd",
-@@ -400,6 +451,38 @@ void Objecter::shutdown()
+@@ -400,6 +448,38 @@ void Objecter::shutdown()
  {
    ceph_assert(initialized);
  
@@ -2601,7 +2592,20 @@ index bc39114..f753045 100644
    unique_lock wl(rwlock);
  
    initialized = false;
-@@ -1229,17 +1312,41 @@ void Objecter::handle_osd_map(MOSDMap *m)
+@@ -1062,6 +1142,12 @@ void Objecter::_scan_requests(
+   while (p != s->ops.end()) {
+     Op *op = p->second;
+     ++p;   // check_op_pool_dne() may touch ops; prevent iterator invalidation
++#ifdef WITH_GLOBAL_CACHE
++    if (op->target.osd >> 20) {
++        ldout(cct, 10) << " dont need to resend op here, tid=" << op->tid << ", waiting for nodeView event" << dendl;
++        continue;
++    }
++#endif
+     ldout(cct, 10) << " checking op " << op->tid << dendl;
+     _prune_snapc(osdmap->get_new_removed_snaps(), op);
+     if (skipped_map) {
+@@ -1229,17 +1315,41 @@ void Objecter::handle_osd_map(MOSDMap *m)
  	for (map<int,OSDSession*>::iterator p = osd_sessions.begin();
  	     p != osd_sessions.end(); ) {
  	  OSDSession *s = p->second;
@@ -2647,7 +2651,7 @@ index bc39114..f753045 100644
  	}
  
  	ceph_assert(e == osdmap->get_epoch());
-@@ -1772,6 +1879,53 @@ int Objecter::_get_session(int osd, OSDSession **session, shunique_lock& sul)
+@@ -1772,6 +1882,53 @@ int Objecter::_get_session(int osd, OSDSession **session, shunique_lock& sul)
      return 0;
    }
  
@@ -2701,7 +2705,7 @@ index bc39114..f753045 100644
    map<int,OSDSession*>::iterator p = osd_sessions.find(osd);
    if (p != osd_sessions.end()) {
      OSDSession *s = p->second;
-@@ -1787,6 +1941,7 @@ int Objecter::_get_session(int osd, OSDSession **session, shunique_lock& sul)
+@@ -1787,6 +1944,7 @@ int Objecter::_get_session(int osd, OSDSession **session, shunique_lock& sul)
    OSDSession *s = new OSDSession(cct, osd);
    osd_sessions[osd] = s;
    s->con = messenger->connect_to_osd(osdmap->get_addrs(osd));
@@ -2709,7 +2713,7 @@ index bc39114..f753045 100644
    s->con->set_priv(RefCountedPtr{s});
    logger->inc(l_osdc_osd_session_open);
    logger->set(l_osdc_osd_sessions, osd_sessions.size());
-@@ -2181,6 +2336,12 @@ void Objecter::tick()
+@@ -2181,6 +2339,12 @@ void Objecter::tick()
      }
    }
  
@@ -2722,24 +2726,7 @@ index bc39114..f753045 100644
    // Make sure we don't reschedule if we wake up after shutdown
    if (initialized) {
      tick_event = timer.reschedule_me(ceph::make_timespan(
-@@ -2296,6 +2457,16 @@ void Objecter::_send_op_account(Op *op)
-   }
- 
-   logger->inc(l_osdc_op_active);
-+#ifdef WITH_GLOBAL_CACHE
-+  if (gc_perf) {
-+    PluginRegistry *reg = cct->get_plugin_registry();
-+    auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
-+    ceph_assert(plugin);
-+    if (plugin->msg_ref->filter_msg(&op->target)) {
-+      logger->inc(l_osdc_op_gc_active);
-+    }
-+  }
-+#endif
-   logger->inc(l_osdc_op);
- 
-   if ((op->target.flags & (CEPH_OSD_FLAG_READ | CEPH_OSD_FLAG_WRITE)) ==
-@@ -2363,10 +2534,25 @@ void Objecter::_op_submit(Op *op, shunique_lock& sul, ceph_tid_t *ptid)
+@@ -2363,10 +2527,25 @@ void Objecter::_op_submit(Op *op, shunique_lock& sul, ceph_tid_t *ptid)
    // pick target
    ceph_assert(op->session == NULL);
    OSDSession *s = NULL;
@@ -2766,7 +2753,7 @@ index bc39114..f753045 100644
    // Try to get a session, including a retry if we need to take write lock
    int r = _get_session(op->target.osd, &s, sul);
    if (r == -EAGAIN ||
-@@ -2382,8 +2568,24 @@ void Objecter::_op_submit(Op *op, shunique_lock& sul, ceph_tid_t *ptid)
+@@ -2382,8 +2561,24 @@ void Objecter::_op_submit(Op *op, shunique_lock& sul, ceph_tid_t *ptid)
        // map changed; recalculate mapping
        ldout(cct, 10) << __func__ << " relock raced with osdmap, recalc target"
  		     << dendl;
@@ -2792,7 +2779,7 @@ index bc39114..f753045 100644
        if (s) {
  	put_session(s);
  	s = NULL;
-@@ -2453,6 +2655,17 @@ void Objecter::_op_submit(Op *op, shunique_lock& sul, ceph_tid_t *ptid)
+@@ -2453,6 +2648,17 @@ void Objecter::_op_submit(Op *op, shunique_lock& sul, ceph_tid_t *ptid)
    _session_op_assign(s, op);
  
    if (need_send) {
@@ -2810,7 +2797,7 @@ index bc39114..f753045 100644
      _send_op(op);
    }
  
-@@ -2770,6 +2983,231 @@ void Objecter::_prune_snapc(
+@@ -2770,6 +2976,231 @@ void Objecter::_prune_snapc(
    }
  }
  
@@ -3042,7 +3029,7 @@ index bc39114..f753045 100644
  int Objecter::_calc_target(op_target_t *t, Connection *con, bool any_change)
  {
    // rwlock is locked
-@@ -2969,6 +3407,7 @@ int Objecter::_calc_target(op_target_t *t, Connection *con, bool any_change)
+@@ -2969,6 +3400,7 @@ int Objecter::_calc_target(op_target_t *t, Connection *con, bool any_change)
    return RECALC_OP_TARGET_NO_ACTION;
  }
  
@@ -3050,25 +3037,15 @@ index bc39114..f753045 100644
  int Objecter::_map_session(op_target_t *target, OSDSession **s,
  			   shunique_lock& sul)
  {
-@@ -3139,7 +3578,16 @@ void Objecter::_finish_op(Op *op, int r)
+@@ -3139,7 +3571,6 @@ void Objecter::_finish_op(Op *op, int r)
    }
  
    logger->dec(l_osdc_op_active);
 -
-+#ifdef WITH_GLOBAL_CACHE
-+  if (gc_perf) {
-+    PluginRegistry *reg = cct->get_plugin_registry();
-+    auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
-+    ceph_assert(plugin);
-+    if (plugin->msg_ref->filter_msg(&op->target)) {
-+      logger->dec(l_osdc_op_gc_active);
-+    }
-+  }
-+#endif
    ceph_assert(check_latest_map_ops.find(op->tid) == check_latest_map_ops.end());
  
    inflight_ops--;
-@@ -3271,6 +3719,38 @@ void Objecter::_send_op(Op *op)
+@@ -3271,6 +3702,38 @@ void Objecter::_send_op(Op *op)
    if (op->trace.valid()) {
      m->trace.init("op msg", nullptr, &op->trace);
    }
@@ -3107,11 +3084,59 @@ index bc39114..f753045 100644
    op->session->con->send_message(m);
  }
  
-@@ -3326,6 +3806,82 @@ int Objecter::take_linger_budget(LingerOp *info)
+@@ -3326,6 +3789,130 @@ int Objecter::take_linger_budget(LingerOp *info)
    return 1;
  }
  
 +#ifdef WITH_GLOBAL_CACHE
++void Objecter::nodeview_change_retry_op_submit(set<uint32_t> available_nodes)
++{
++    ldout(cct, 3) << "Enter NodeView Change Retry OP Submit. available_nodes=" << available_nodes << dendl;
++    map<ceph_tid_t, Op *> need_resend;
++    unique_lock sul(rwlock);
++    for (map<int, OSDSession *>::iterator p = osd_sessions.begin(); p != osd_sessions.end();) {
++        OSDSession *s = p->second;
++        int osd = p->first;
++        ldout(cct, 3) << "NodeView Change osd=" << osd << " ops=" << s->ops << dendl;
++        if (!(osd >> 20) || available_nodes.find((osd & ~(0x1 << 20)) >> 4) != available_nodes.end()) {
++            ++p;
++            continue;
++        }
++        OSDSession::unique_lock sl(s->lock);
++        map<ceph_tid_t, Op *>::iterator it = s->ops.begin();
++        while (it != s->ops.end()) {
++            _session_op_remove(it->second->session, it->second);
++            need_resend[it->second->tid] = it->second;
++            it = s->ops.begin();
++        }
++        ++p;
++        sl.unlock();
++        close_session(s);
++    }
++
++    OSDSession *s = homeless_session;
++    OSDSession::unique_lock sl(s->lock);
++    map<ceph_tid_t, Op *>::iterator p = s->ops.begin();
++    while (p != s->ops.end()) {
++        Op *op = p->second;
++        ++p;
++        if (op->target.osd >> 20) {
++            ldout(cct, 3) << "NodeView Change: need resend homeless op: " << op->tid << dendl;
++            _session_op_remove(op->session, op);
++            need_resend[op->tid] = op;
++        }
++    }
++    sl.unlock();
++
++    sul.unlock();
++    ldout(cct, 3) << "NodeView Change Retry OP Submit: need_resend size: " << need_resend.size() << dendl;
++    for (map<ceph_tid_t, Op *>::iterator it = need_resend.begin(); it != need_resend.end(); it++) {
++        shunique_lock sul(rwlock, ceph::acquire_shared);
++        ldout(cct, 3) << "NodeView Change Retry OP Submit. TID: " << it->second->tid << dendl;
++        logger->dec(l_osdc_op_active);
++        _op_submit(it->second, sul, &(it->second->tid));
++    }
++}
 +void Objecter::retry_op_submit(vector<uint32_t> ready_pt_id)
 +{
 +  if (!ready_pt_id.size()) {
@@ -3190,7 +3215,7 @@ index bc39114..f753045 100644
  /* This function DOES put the passed message before returning */
  void Objecter::handle_osd_op_reply(MOSDOpReply *m)
  {
-@@ -3348,7 +3904,11 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
+@@ -3348,7 +3935,11 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
      m->put();
      return;
    }
@@ -3203,7 +3228,7 @@ index bc39114..f753045 100644
    OSDSession::unique_lock sl(s->lock);
  
    map<ceph_tid_t, Op *>::iterator iter = s->ops.find(tid);
-@@ -3406,7 +3966,6 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
+@@ -3406,7 +3997,6 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
    Context *onfinish = 0;
  
    int rc = m->get_result();
@@ -3211,7 +3236,15 @@ index bc39114..f753045 100644
    if (m->is_redirect_reply()) {
      ldout(cct, 5) << " got redirect reply; redirecting" << dendl;
      if (op->onfinish)
-@@ -3443,8 +4002,48 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
+@@ -3438,13 +4028,56 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
+     op->target.flags &= ~(CEPH_OSD_FLAG_BALANCE_READS |
+ 			  CEPH_OSD_FLAG_LOCALIZE_READS);
+     op->target.pgid = pg_t();
++#ifdef WITH_GLOBAL_CACHE
++    logger->dec(l_osdc_op_active);
++#endif
+     _op_submit(op, sul, NULL);
+     m->put();
      return;
    }
  
@@ -3260,7 +3293,7 @@ index bc39114..f753045 100644
    if (op->objver)
      *op->objver = m->get_user_version();
    if (op->reply_epoch)
-@@ -4399,6 +4998,53 @@ bool Objecter::ms_handle_reset(Connection *con)
+@@ -4399,6 +5032,53 @@ bool Objecter::ms_handle_reset(Connection *con)
      if (session) {
        ldout(cct, 1) << "ms_handle_reset " << con << " session " << session
  		    << " osd." << session->osd << dendl;
@@ -3299,9 +3332,9 @@ index bc39114..f753045 100644
 +      for (map<ceph_tid_t,Op*>::iterator p = resend.begin(); p!= resend.end(); ++p ) {
 +        Op *op = p->second;
 +        shunique_lock sul(rwlock, ceph::acquire_shared);
-+        ldout(cct, 3) << __func__ << " resend submit op " << op  << dendl;
++        ldout(cct, 3) << __func__ << " resend submit op " << op << " tid=" << op->tid << dendl;
 +        if (gc_perf && plugin->msg_ref->filter_msg_by_op(op)) {
-+          logger->dec(l_osdc_op_gc_active);
++          logger->dec(l_osdc_op_active);
 +          logger->inc(l_osdc_op_gc_resend);
 +        }
 +        _op_submit(op, sul, NULL);
@@ -3315,7 +3348,7 @@ index bc39114..f753045 100644
        // says the osd down
        if (!(initialized && osdmap->is_up(session->osd))) {
 diff --git a/src/osdc/Objecter.h b/src/osdc/Objecter.h
-index ca8d85f..9723662 100644
+index ca8d85f..4e73f41 100644
 --- a/src/osdc/Objecter.h
 +++ b/src/osdc/Objecter.h
 @@ -1341,7 +1341,13 @@ public:
@@ -3333,7 +3366,7 @@ index ca8d85f..9723662 100644
      ConnectionRef con;  // for rx buffer only
      uint64_t features;  // explicitly specified op features
  
-@@ -1863,9 +1869,29 @@ public:
+@@ -1863,9 +1869,32 @@ public:
  
    bool osdmap_full_flag() const;
    bool osdmap_pool_full(const int64_t pool_id) const;
@@ -3349,8 +3382,11 @@ index ca8d85f..9723662 100644
 +  };
 +
 +  RetryOp retry_op;
- 
++
 +  void retry_op_submit(vector<uint32_t> ready_pt_id);
+ 
++  void nodeview_change_retry_op_submit(set<uint32_t> available_nodes);
++
 +  bool gc_perf;
 +#endif
   private:
@@ -3363,7 +3399,7 @@ index ca8d85f..9723662 100644
    /**
     * Test pg_pool_t::FLAG_FULL on a pool
     *
-@@ -2057,6 +2083,34 @@ private:
+@@ -2057,6 +2086,34 @@ private:
      return std::forward<Callback>(cb)(*osdmap, std::forward<Args>(args)...);
    }
  
@@ -3435,11 +3471,11 @@ index 0000000..2eb494c
 +message(STATUS "Client adaptor test cmake executing...")
 diff --git a/src/test/ClientAdaptorTest/ClientAdaptorTest.cc b/src/test/ClientAdaptorTest/ClientAdaptorTest.cc
 new file mode 100644
-index 0000000..2d69eb1
+index 0000000..75d4a95
 --- /dev/null
 +++ b/src/test/ClientAdaptorTest/ClientAdaptorTest.cc
-@@ -0,0 +1,389 @@
-+;/* License:LGPL-2.1
+@@ -0,0 +1,390 @@
++/* License:LGPL-2.1
 +*
 +* Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
 +*
@@ -3477,8 +3513,8 @@ index 0000000..2d69eb1
 +
 +  int32_t get_pt_entry(uint32_t pt_index, PTViewPtEntry* entry) override {
 +    std::cout << "Client Adaptor: PT index is" << pt_index << std::endl;
-+    entry->masterNode = pt_index % 3;
-+    std::cout << "Client Adaptor: PT entry master node id is" << entry->masterNode << std::endl;
++    entry->curNodeInfo.nodeId = pt_index % 3;
++    std::cout << "Client Adaptor: PT entry master node id is" << entry->curNodeInfo.nodeId << std::endl;
 +    return 0;
 +  }
 +
@@ -3493,7 +3529,8 @@ index 0000000..2d69eb1
 +    return 0;
 +  }
 +
-+  int32_t remove_snap_from_gc(const int64_t pool_id, const std::string &image_id, const uint64_t snap_id) {
++  int32_t remove_snap_from_gc(const int64_t pool_id, const std::string &name_space, 
++                              const std::string &image_id, uint64_t snap_id) {
 +    return 0;
 +  }
 +
