@@ -201,7 +201,7 @@ typedef struct {
     uint64_t numObjects;
 } CephClusterStat;
 
-typedef int32_t (*NotifyPoolEventFn)(uint32_t poolId);
+typedef int32_t (*NotifyPoolEventFn)(uint32_t *poolId, uint32_t length);
 
 typedef void *completion_t;
 typedef void (*CallBack_t)(int ret, void *arg);

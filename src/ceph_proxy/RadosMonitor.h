@@ -1,9 +1,3 @@
-/* License:LGPL-2.1
- *
- * Copyright (c) 2021 Huawei Technologies Co., Ltf All rights reserved.
- *
- */
-
 #ifndef PROXY_RADOS_MONITOR_H
 #define PROXY_RADOS_MONITOR_H
 
@@ -44,27 +38,24 @@ private:
 	bool stop;
 	uint32_t timeInterval;
 	std::map<uint32_t, PoolUsageInfo> poolInfoMap;
-	bool poolNewNotifyFnFirstRegistered;
 	std::map<uint32_t, PoolUsageInfo> tmpPoolInfoMap;
-	std::vector<uint32_t> tempPoolList;
+	std::vector<uint32_t> poolList;
 
-	int32_t FirstReportAllPool(void);
-	int32_t ReportPoolNewAndDel(std::vector<uint32_t> &newPools,
-								std::vector<uint32_t> &delPools);
+	int32_t ReportPoolNewAndDel(std::vector<uint32_t> &newPools);
 public:
 	PoolUsageStat(CephProxy *_proxy): proxy(_proxy), ccm_adaptor(NULL), stop(false),
-					timeInterval(DEFAULT_UPDATE_TIME_INTERVAL),
-					poolNewNotifyFnFirstRegistered(false) { }
+					timeInterval(DEFAULT_UPDATE_TIME_INTERVAL) { }
 	~PoolUsageStat() { }
 
 	int32_t GetPoolUsageInfo(uint32_t poolId, PoolUsageInfo *poolInfo);
 	int32_t GetPoolAllUsedAndAvail(uint64_t &usedSize, uint64_t &maxAvail);
 	int32_t Record(std:: smatch &result);
+	void Compare();
 	int32_t GetPoolReplicationSize(uint32_t poolId, double &rep);
 	int32_t UpdatePoolUsage(void);
 	int32_t UpdatePoolList(void);
-	int32_t RegisterPoolDelNotifyFn(NotifyPoolEventFn fn);
 	int32_t RegisterPoolNewNotifyFn(NotifyPoolEventFn fn);
+
 	uint32_t GetTimeInterval();
 	bool isStop();
 	void Start(void);

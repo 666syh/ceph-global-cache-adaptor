@@ -111,7 +111,7 @@ int cls_getxattr(cls_method_context_t hctx, const char *name, char **outdata, in
 	ops.swap(ptr->ops);
 	opreq.vecOps.clear();
 	opreq.vecOps.push_back(op);
-	r = pctx->cbFunc(&opreq);
+	r = pctx->cbFunc(opreq);
 	ops.swap(ptr->ops);
 	if (r < 0)
 		return r;
@@ -140,7 +140,7 @@ int cls_setxattr(cls_method_context_t hctx, const char *name, const char *value,
 
 	opreq.vecOps.clear();
 	opreq.vecOps.push_back(op);
-	return pctx->cbFunc(&opreq);
+	return pctx->cbFunc(opreq);
 }
 
 int cls_get_request_origin(cls_method_context_t hctx, entity_inst_t *origin)
@@ -182,7 +182,7 @@ int cls_cxx_create(cls_method_context_t hctx, bool exclusive)
 
 	opreq.vecOps.clear();
 	opreq.vecOps.push_back(op);
-	return pctx->cbFunc(&opreq);
+	return pctx->cbFunc(opreq);
 }
 
 int cls_cxx_remove(cls_method_context_t hctx)
@@ -197,7 +197,7 @@ int cls_cxx_remove(cls_method_context_t hctx)
 
 	opreq.vecOps.clear();
 	opreq.vecOps.push_back(op);
-	return pctx->cbFunc(&opreq);
+	return pctx->cbFunc(opreq);
 }
 
 int cls_cxx_stat(cls_method_context_t hctx, uint64_t *size, time_t *mtime)
@@ -216,7 +216,7 @@ int cls_cxx_stat(cls_method_context_t hctx, uint64_t *size, time_t *mtime)
 	ops.swap(ptr->ops);
 	opreq.vecOps.clear();
 	opreq.vecOps.push_back(op);
-	r = pctx->cbFunc(&opreq);
+	r = pctx->cbFunc(opreq);
 	ops.swap(ptr->ops);
 	if(r < 0)
 		return r;
@@ -256,7 +256,7 @@ int cls_cxx_stat2(cls_method_context_t hctx, uint64_t *size, ceph::real_time *mt
 	ops.swap(ptr->ops);
 	opreq.vecOps.clear();
 	opreq.vecOps.push_back(op);
-	r = pctx->cbFunc(&opreq);
+	r = pctx->cbFunc(opreq);
 	ops.swap(ptr->ops);
 	if(r < 0)
 		return r;
@@ -306,7 +306,7 @@ int cls_cxx_read2(cls_method_context_t hctx, int ofs, int len,
 	ops.swap(ptr->ops);
 	opreq.vecOps.clear();
 	opreq.vecOps.push_back(op);
-	r = pctx->cbFunc(&opreq);
+	r = pctx->cbFunc(opreq);
 	ops.swap(ptr->ops);
 	if(r < 0)
 		return r;
@@ -325,7 +325,6 @@ int cls_cxx_write2(cls_method_context_t hctx, int ofs, int len, bufferlist *inbl
 	SaOpContext *pctx = reinterpret_cast<SaOpContext *>(hctx);
 	SaOpReq *pOpReq = pctx->opReq;
 	SaOpReq opreq = *pOpReq;
-	MOSDOp *ptr = reinterpret_cast<MOSDOp *>(pOpReq->ptrMosdop);
 	OpRequestOps op;
 	
 	op.opSubType = CEPH_OSD_OP_WRITE;
@@ -340,7 +339,7 @@ int cls_cxx_write2(cls_method_context_t hctx, int ofs, int len, bufferlist *inbl
 
 	opreq.vecOps.clear();
 	opreq.vecOps.push_back(op);
-	return pctx->cbFunc(&opreq);
+	return pctx->cbFunc(opreq);
 }
 
 int cls_cxx_write_full(cls_method_context_t hctx, bufferlist *inbl)
@@ -360,7 +359,7 @@ int cls_cxx_write_full(cls_method_context_t hctx, bufferlist *inbl)
 
 	opreq.vecOps.clear();
 	opreq.vecOps.push_back(op);
-	return pctx->cbFunc(&opreq);
+	return pctx->cbFunc(opreq);
 }
 
 int cls_cxx_getxattr(cls_method_context_t hctx, const char *name, bufferlist *outbl)
@@ -380,7 +379,7 @@ int cls_cxx_getxattr(cls_method_context_t hctx, const char *name, bufferlist *ou
 	ops.swap(ptr->ops);
 	opreq.vecOps.clear();
 	opreq.vecOps.push_back(op);
-	r = pctx->cbFunc(&opreq);
+	r = pctx->cbFunc(opreq);
 	ops.swap(ptr->ops);
 	if(r < 0)
 		return r;
@@ -405,7 +404,7 @@ int cls_cxx_getxattrs(cls_method_context_t hctx, map<string, bufferlist> *attrse
 	ops.swap(ptr->ops);
 	opreq.vecOps.clear();
 	opreq.vecOps.push_back(op);
-	r = pctx->cbFunc(&opreq);
+	r = pctx->cbFunc(opreq);
 	ops.swap(ptr->ops);
 	if( r < 0)
 		return r;
@@ -437,7 +436,7 @@ int cls_cxx_setxattr(cls_method_context_t hctx, const char *name, bufferlist *in
 
 	opreq.vecOps.clear();
 	opreq.vecOps.push_back(op);
-	return pctx->cbFunc(&opreq);
+	return pctx->cbFunc(opreq);
 }
 
 int cls_cxx_map_get_all_vals(cls_method_context_t hctx, map<string, bufferlist> *vals, bool *more)
@@ -464,7 +463,7 @@ int cls_cxx_map_get_all_vals(cls_method_context_t hctx, map<string, bufferlist> 
 	ops.swap(ptr->ops);
 	opreq.vecOps.clear();
 	opreq.vecOps.push_back(op);
-	r = pctx->cbFunc(&opreq);
+	r = pctx->cbFunc(opreq);
 	ops.swap(ptr->ops);
 	if( r < 0)
 		return r;
@@ -500,7 +499,7 @@ int cls_cxx_map_get_keys(cls_method_context_t hctx, const string &start_obj, uin
 	ops.swap(ptr->ops);
 	opreq.vecOps.clear();
 	opreq.vecOps.push_back(op);
-	r = pctx->cbFunc(&opreq);
+	r = pctx->cbFunc(opreq);
 	ops.swap(ptr->ops);
 	if( r < 0)
 		return r;
@@ -540,7 +539,7 @@ int cls_cxx_map_get_vals(cls_method_context_t hctx, const string &start_obj, con
 	ops.swap(ptr->ops);
 	opreq.vecOps.clear();
 	opreq.vecOps.push_back(op);
-	r = pctx->cbFunc(&opreq);
+	r = pctx->cbFunc(opreq);
 	ops.swap(ptr->ops);
 	if( r < 0)
 		return r;
@@ -571,7 +570,7 @@ int cls_cxx_map_read_header(cls_method_context_t hctx, bufferlist *outbl)
 	ops.swap(ptr->ops);
 	opreq.vecOps.clear();
 	opreq.vecOps.push_back(op);
-	r = pctx->cbFunc(&opreq);
+	r = pctx->cbFunc(opreq);
 	ops.swap(ptr->ops);
 	if(r < 0)
 		return r;
@@ -598,7 +597,7 @@ int cls_cxx_map_get_val(cls_method_context_t hctx, const string &key, bufferlist
 	ops.swap(ptr->ops);
 	opreq.vecOps.clear();
 	opreq.vecOps.push_back(op);
-	r = pctx->cbFunc(&opreq);
+	r = pctx->cbFunc(opreq);
 	ops.swap(ptr->ops);
 	if(r < 0)
 		return r;
@@ -637,7 +636,7 @@ int cls_cxx_map_set_val(cls_method_context_t hctx, const string &key, bufferlist
 	
 	opreq.vecOps.clear();
 	opreq.vecOps.push_back(op);
-	return  pctx->cbFunc(&opreq);
+	return  pctx->cbFunc(opreq);
 }
 
 int cls_cxx_map_set_vals(cls_method_context_t hctx, const std::map<string, bufferlist> *map)
@@ -661,7 +660,7 @@ int cls_cxx_map_set_vals(cls_method_context_t hctx, const std::map<string, buffe
 	
 	opreq.vecOps.clear();
 	opreq.vecOps.push_back(op);	
-	return pctx->cbFunc(&opreq);
+	return pctx->cbFunc(opreq);
 }
 
 int cls_cxx_map_clear(cls_method_context_t hctx)
@@ -677,7 +676,7 @@ int cls_cxx_map_clear(cls_method_context_t hctx)
 	
 	opreq.vecOps.clear();
 	opreq.vecOps.push_back(op);	
-	return pctx->cbFunc(&opreq);
+	return pctx->cbFunc(opreq);
 }
 
 int cls_cxx_map_write_header(cls_method_context_t hctx, bufferlist *inbl)
@@ -695,7 +694,7 @@ int cls_cxx_map_write_header(cls_method_context_t hctx, bufferlist *inbl)
 
 	opreq.vecOps.clear();
 	opreq.vecOps.push_back(op);	
-	return pctx->cbFunc(&opreq);
+	return pctx->cbFunc(opreq);
 }
 
 int cls_cxx_map_remove_key(cls_method_context_t hctx, const string &key)
@@ -712,7 +711,7 @@ int cls_cxx_map_remove_key(cls_method_context_t hctx, const string &key)
 	
 	opreq.vecOps.clear();
 	opreq.vecOps.push_back(op);
-	return pctx->cbFunc(&opreq);
+	return pctx->cbFunc(opreq);
 }
 
 int cls_gen_random_bytes(char *buf, int size)

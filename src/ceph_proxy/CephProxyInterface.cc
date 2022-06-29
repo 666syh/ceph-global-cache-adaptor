@@ -121,13 +121,6 @@ int CephProxyGetUsedSizeAndMaxAvail(ceph_proxy_t proxy, uint64_t &usedSize, uint
 	return cephProxy->GetPoolUsedSizeAndMaxAvail(usedSize, maxAvail);
 }
 
-int CephProxyRegisterPoolDelNotifyFn(NotifyPoolEventFn fn)
-{
-	ceph_proxy_t proxy = GetCephProxyInstance();
-	CephProxy *cephProxy = reinterpret_cast<CephProxy *>(proxy);
-	return cephProxy->RegisterPoolDelNotifyFn(fn);
-}
-
 int CephProxyRegisterPoolNewNotifyFn(NotifyPoolEventFn fn)
 {
 	ceph_proxy_t proxy = GetCephProxyInstance();

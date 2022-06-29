@@ -79,7 +79,6 @@ public:
 	int GetMinAllocSize(uint32_t *minAllocSize, CEPH_BDEV_TYPE_E type);
 	int GetPoolUsedSizeAndMaxAvail(uint64_t &usedSize, uint64_t &maxAvail);
 	int RegisterPoolNewNotifyFn(NotifyPoolEventFn fn);
-	int RegisterPoolDelNotifyFn(NotifyPoolEventFn fn);
 };
 
 #endif

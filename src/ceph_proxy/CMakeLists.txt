@@ -1,5 +1,6 @@
-
+﻿#TODO:修改librados路径
 set(lib_rados_include_dir ${CMAKE_CURRENT_SOURCE_DIR}/../../../../ceph/src/include)
+set(lib_rbd_include_dir ${CMAKE_CURRENT_SOURCE_DIR}/../../../../ceph/src/include)
 
 set(lib_dpax_include_dir ${GLOBAL_CACHE_DIR}/src/include/infras/infrastructure/osax)
 set(lib_lvos_include_idr ${GLOBAL_CACHE_DIR}/src/include/infras/infrastructure/lvos)
@@ -16,6 +17,7 @@ set(ceph_proxy_srcs CephProxyInterface.cc
                     RadosMonitor.cc
                     CephProxyFtds.cc
                     CcmAdaptor.cc
+                    RbdWrapper.cc
                     CephProxyLog.h)
 
 if (NOT RADOS_DIR)
@@ -28,6 +30,39 @@ find_library(RADOS_LIB
     PATHS
     ${RADOS_DIR}/build/lib
     NO_DEFAULT_PATH
+)
+
+if (NOT RBD_DIR)
+    set(RBD_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../../ceph-14.2.8)
+endif()
+message("RBD_DIR=${RBD_DIR}")
+find_library(RBD_LIB
+    NAMES
+    librbd.so.1
+    PATHS
+    ${RBD_DIR}/build/lib
+    NO_DEFAULT_PATH
+)
+
+find_library(FTDS_LIB
+    NAMES
+    libftdsclient.so
+    PATHS
+    ${GLOBAL_CACHE_DIR}/build/my_pkg_root/lib
+)
+
+find_library(DPLOG_LIB
+    NAMES
+    libdplog.so
+    PATHS
+    ${GLOBAL_CACHE_DIR}/build/my_pkg_root/lib
+)
+
+find_library(DPOSAX_LIB
+    NAMES
+    libdposax.so
+    PATHS
+    ${GLOBAL_CACHE_DIR}/build/my_pkg_root/lib
 )
 
 add_library(proxy SHARED ${ceph_proxy_srcs})
@@ -56,10 +91,11 @@ endif()
 endif()
 
 target_include_directories(proxy PRIVATE ${lib_rados_include_dir}
+                     ${lib_rbd_include_dir}
 					 ${lib_dpax_include_dir}
 					 ${lib_lvos_include_idr}
 					 ${lib_ftds_include_dir}
 					 ${lib_dplog_include_dir}
                      ${lib_dpax_redef_include_dir})
 
-target_link_libraries(proxy PUBLIC ${RADOS_LIB} -lpthread)
+target_link_libraries(proxy PUBLIC ${RADOS_LIB} ${RBD_LIB} ${FTDS_LIB} ${DPLOG_LIB} ${DPOSAX_LIB} -lpthread)

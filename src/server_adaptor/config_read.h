@@ -60,6 +60,11 @@ public:
     uint32_t GetWriteQoS();
     uint32_t GetQuotCyc();
     uint32_t GetMessengerThrottle();
+    uint64_t GetSaOpThrottle();
+    uint64_t GetWriteOpThrottle();
+    uint64_t GetReadOpThrottle();
+    uint64_t GetWriteBWThrottle();
+    uint64_t GetReadBWThrottle();
 };
 
 #endif

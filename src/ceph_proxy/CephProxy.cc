@@ -7,9 +7,9 @@
 #include "CephProxy.h"
 #include "PoolContext.h"
 #include "RadosWrapper.h"
-#include "CephProxyFtds.h"
 #include "CephProxyOp.h"
 #include "RadosWorker.h"
+#include "CephProxyFtds.h"
 #include "ConfigRead.h"
 #include "CephProxyLog.h"
 
@@ -250,16 +250,6 @@ int CephProxy::GetPoolUsedSizeAndMaxAvail(uint64_t &usedSize, uint64_t &maxAvail
     }
 
     return poolStatManager->GetPoolAllUsedAndAvail(usedSize, maxAvail);
-}
-
-int CephProxy::RegisterPoolDelNotifyFn(NotifyPoolEventFn fn)
-{
-    if (poolStatManager == nullptr) {
-        ProxyDbgLogErr("proxy is not working.");
-	    return -1;
-    }
-
-    return poolStatManager->RegisterPoolDelNotifyFn(fn);
 }
 
 int CephProxy::RegisterPoolNewNotifyFn(NotifyPoolEventFn fn)

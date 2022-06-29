@@ -1,10 +1,4 @@
-/* License:LGPL-2.1
- *
- * Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
- *
- */
-
-#include <vector>
+﻿#include <vector>
 #include <regex>
 #include <thread>
 #include <mutex>
@@ -81,30 +75,31 @@ int32_t PoolUsageStat::GetPoolAllUsedAndAvail(uint64_t &usedSize, uint64_t &maxA
     if (iter != poolInfoMap.end()) {
         maxAvail = iter->second.maxAvail;
     }
+
     for (; iter != poolInfoMap.end(); iter++) {
         usedSize += iter->second.usedSize;
         if (maxAvail == 0 && iter->second.maxAvail != 0) {
 	        maxAvail = iter->second.maxAvail;
         }
     }
-    mutex.unlock_shared();
+mutex.unlock_shared();
 
-    return 0;
+return 0;
 }
 
-int32_t PoolUsageStat::GetPoolReplicationSize(uint32_t poolId, double &rep)
+int32_t PoolUsageStat::GetPoolReplicationSize(uint32_t poolId, double& rep)
 {
     rados_ioctx_t ioctx = proxy->GetIoCtx2(poolId);
     if (ioctx == NULL) {
-        ProxyDbgLogErr("get ioctx failed.");
-	    return -1;
+        ProxyDbgLogErr("get ioctx failed, poolid=%u", poolId);
+        return -1;
     }
 
     CephPoolStat stat;
     int32_t ret = proxy->GetPoolStat(ioctx, &stat);
     if (ret != 0) {
-        ProxyDbgLogErr("Get ioctx failed.");
-	    return -1;
+        ProxyDbgLogErr("Get pool state failed, poolid=%u", poolId);
+        return -1;
     }
 
     if (stat.numObjects == 0 || stat.numObjectCopies == 0) {
@@ -112,10 +107,11 @@ int32_t PoolUsageStat::GetPoolReplicationSize(uint32_t poolId, double &rep)
     } else {
         rep = (stat.numObjectCopies * 1.0) / stat.numObjects;
     }
+
     return 0;
 }
 
-int32_t PoolUsageStat::Record(std::smatch &result)
+int32_t PoolUsageStat::Record(std::smatch& result)
 {
     uint32_t poolId = 0;
     double storedSize = 0.0;
@@ -131,54 +127,86 @@ int32_t PoolUsageStat::Record(std::smatch &result)
     //
     for (size_t i = 2; i < result.size(); i++) {
         if (i == 2) {
-	    int id = atoi(result[i].str().c_str());
-	    if (id < 0) {
-	        return -1;
-	    }
-	    poolId = (uint32_t)id;
-	} else if (i == 3) {
-	    storedSize = atof(result[i].str().c_str());
-	} else if (i == 4) {
-	    storedSizeUnit = TransStrUnitToNum(result[i].str().c_str());
-	} else if (i == 5) {
-	    objectsNum = atof(result[i].str().c_str());
-	} else if (i == 6) {
-	    if (result[i].length() == 0) {
-	        numUnit = 1;
-	    } else if (strcmp(result[i].str().c_str(), "k") == 0) {
-	        numUnit = 1000;
-	    } else if (strcmp(result[i].str().c_str(), "m") == 0) {
-	        numUnit = 1000 * 1000;
-	    }
-	} else if (i == 7) {
-	    usedSize = atof(result[i].str().c_str());
-	} else if (i == 8) {
-	    usedSizeUnit = TransStrUnitToNum(result[i].str().c_str());
-	} else if (i == 9) {
-	    useRatio = atof(result[i].str().c_str());
-	} else if (i == 10) {
-	    maxAvail = atof(result[i].str().c_str());
-	} else if (i == 11) {
-	    maxAvailUnit = TransStrUnitToNum(result[i].str().c_str());
-	}
+            int id = atoi(result[i].str().c_str());
+            if (id < 0) {
+                return -1;
+            }
+            poolId = (uint32_t)id;
+        } else if (i == 3) {
+            storedSize = atof(result[i].str().c_str());
+        } else if (i == 4) {
+            storedSizeUnit = TransStrUnitToNum(result[i].str().c_str());
+        } else if (i == 5) {
+            objectsNum = atof(result[i].str().c_str());
+        } else if (i == 6) {
+            if (result[i].length() == 0) {
+                numUnit = 1;
+            } else if (strcmp(result[i].str().c_str(), "k") == 0) {
+                numUnit = 1000;
+            } else if (strcmp(result[i].str().c_str(), "m") == 0) {
+                numUnit = 1000 * 1000;
+            }
+        } else if (i == 7) {
+            usedSize = atof(result[i].str().c_str());
+        } else if (i == 8) {
+            usedSizeUnit = TransStrUnitToNum(result[i].str().c_str());
+        } else if (i == 9) {
+            useRatio = atof(result[i].str().c_str());
+        } else if (i == 10) {
+            maxAvail = atof(result[i].str().c_str());
+        } else if (i == 11) {
+            maxAvailUnit = TransStrUnitToNum(result[i].str().c_str());
+        }
     }
 
     double rep = 0.0;
     int32_t ret = GetPoolReplicationSize(poolId, rep);
     if (ret != 0) {
-        ProxyDbgLogErr("get replicaiton size failed.");
-	return -1;
+        ProxyDbgLogErr("get replicaiton size failed, poolId=%u", poolId);
+        return -1;
     }
-
     mutex.lock();
     tmpPoolInfoMap[poolId].storedSize = (uint64_t)(storedSize * storedSizeUnit);
     tmpPoolInfoMap[poolId].objectsNum = (uint64_t)(objectsNum * numUnit);
-    tmpPoolInfoMap[poolId].usedSize   = (uint64_t)(usedSize * usedSizeUnit);
-    tmpPoolInfoMap[poolId].useRatio   = useRatio;
-    tmpPoolInfoMap[poolId].maxAvail   = (uint64_t)(maxAvail * maxAvailUnit * rep);
-    tempPoolList.push_back(poolId);
+    tmpPoolInfoMap[poolId].usedSize = (uint64_t)(usedSize * usedSizeUnit);
+    tmpPoolInfoMap[poolId].useRatio = useRatio;
+    tmpPoolInfoMap[poolId].maxAvail = (uint64_t)(maxAvail * maxAvailUnit * rep);
+    poolList.push_back(poolId);
     mutex.unlock();
+    ProxyDbgLogDebug("detect pool, poolId=%u", poolId);
     return 0;
+}
+
+void PoolUsageStat::Compare()
+{
+    std::vector<uint32_t> deletedPool;
+    mutex.lock();
+    // 更新poolinfo表
+    for (uint32_t i = 0; i < poolList.size(); i++) {
+        uint32_t poolId = poolList[i];
+        poolInfoMap[poolId].storedSize = tmpPoolInfoMap[poolId].storedSize;
+        poolInfoMap[poolId].objectsNum = tmpPoolInfoMap[poolId].objectsNum;
+        poolInfoMap[poolId].usedSize = tmpPoolInfoMap[poolId].usedSize;
+        poolInfoMap[poolId].useRatio = tmpPoolInfoMap[poolId].useRatio;
+        poolInfoMap[poolId].maxAvail = tmpPoolInfoMap[poolId].maxAvail;
+        ProxyDbgLogDebug("update pool info, poolId=%u", poolId);
+    }
+
+    // 从pool info中删除已经不存在的pool
+    std::map<uint32_t, PoolUsageInfo>::iterator iter = poolInfoMap.begin();
+    for (; iter != poolInfoMap.end(); iter++) {
+        if (find(poolList.begin(), poolList.end(), iter->first) == poolList.end()) {
+            //
+            deletedPool.push_back(iter->first);
+        }
+    }
+
+    for (uint32_t i = 0; i < deletedPool.size(); i++) {
+        uint32_t poolId = deletedPool[i];
+        poolInfoMap.erase(poolId);
+        ProxyDbgLogDebug("old pool delete, poolId=%u", poolId);
+    }
+    mutex.unlock();
 }
 
 static int GetPoolStorageUsage(PoolUsageStat *mgr, const char *input)
@@ -199,20 +227,21 @@ static int GetPoolStorageUsage(PoolUsageStat *mgr, const char *input)
 
     for (size_t i = 0; i < infoVector.size(); i++) {
         std::regex expression(pattern);
-	std::smatch result;
-	bool flag = std::regex_match(infoVector[i], result, expression);
-	if (flag) {
-	    int32_t ret = mgr->Record(result);
-	    if (ret != 0) {
-	        ProxyDbgLogErr("record pool useage info failed.");
-            if (strs != nullptr) {
-                delete[] strs;
-                strs = nullptr;
-            }
-            return -1;
+	    std::smatch result;
+	    bool flag = std::regex_match(infoVector[i], result, expression);
+	    if (flag) {
+	        int32_t ret = mgr->Record(result);
+	        if (ret != 0) {
+	            ProxyDbgLogErr("record pool useage info failed.");
+                if (strs != nullptr) {
+                    delete[] strs;
+                    strs = nullptr;
+                }
+                return -1;
+	        }
 	    }
-	}
     }
+    mgr->Compare();
 
     if (strs != nullptr) {
 	delete[] strs;
@@ -222,37 +251,12 @@ static int GetPoolStorageUsage(PoolUsageStat *mgr, const char *input)
     return 0;
 }
 
-int32_t PoolUsageStat::FirstReportAllPool(void)
+int32_t PoolUsageStat::ReportPoolNewAndDel(std::vector<uint32_t> &newPools)
 {
-    if (poolNewNotifyFnFirstRegistered == true) {
-        std::vector<uint32_t> existsPools;
-        std::map<uint32_t, PoolUsageInfo>::iterator iter = poolInfoMap.begin();
-        for (; iter != poolInfoMap.end(); iter++) {
-            existsPools.push_back(iter->first);
-        }
-
-        int32_t ret = ccm_adaptor->ReportCreatePool(existsPools);
-        if (ret != 0) {
-            ProxyDbgLogErr("report create pool failed.");
-            return -1;
-        }
-        poolNewNotifyFnFirstRegistered = false;
-    }
-
-    return 0;
-}
-
-int32_t PoolUsageStat::ReportPoolNewAndDel(std::vector<uint32_t> &newPools, std::vector<uint32_t> &delPools)
-{
+    //
     int32_t ret = ccm_adaptor->ReportCreatePool(newPools);
     if (ret != 0) {
         ProxyDbgLogErr("report create pool failed.");
-        return -1;
-    }
-
-    ret = ccm_adaptor->ReportDeletePool(delPools);
-    if (ret != 0) {
-        ProxyDbgLogErr("report deleted pool failed.");
         return -1;
     }
 
@@ -261,60 +265,18 @@ int32_t PoolUsageStat::ReportPoolNewAndDel(std::vector<uint32_t> &newPools, std:
 
 int32_t PoolUsageStat::UpdatePoolList(void)
 {
+    std::vector<uint32_t> tmpList;
     mutex.lock();
-
-    std::vector<uint32_t> deletedPool;
-    std::vector<uint32_t> newPool;
-
-    std::vector<uint32_t>::iterator tmpIter = tempPoolList.begin();
-    for (; tmpIter != tempPoolList.end(); tmpIter++) {
-        std::map<uint32_t, PoolUsageInfo>::iterator mapIter = poolInfoMap.find(*tmpIter);
-        if (mapIter == poolInfoMap.end()) {
-            newPool.push_back(*tmpIter);
-        }
-    }
-
-    std::map<uint32_t, PoolUsageInfo>::iterator iter = poolInfoMap.begin();
-    for (; iter != poolInfoMap.end(); iter++) {
-        if (find(tempPoolList.begin(), tempPoolList.end(), iter->first) == tempPoolList.end()) {
-            deletedPool.push_back(iter->first);
-        }
-    }
-
-    for (size_t i = 0; i < tempPoolList.size(); i++) {
-        uint32_t poolId = tempPoolList[i];
-        poolInfoMap[poolId].storedSize = tmpPoolInfoMap[poolId].storedSize;
-        poolInfoMap[poolId].objectsNum = tmpPoolInfoMap[poolId].objectsNum;
-        poolInfoMap[poolId].usedSize = tmpPoolInfoMap[poolId].usedSize;
-        poolInfoMap[poolId].useRatio = tmpPoolInfoMap[poolId].useRatio;
-        poolInfoMap[poolId].maxAvail = tmpPoolInfoMap[poolId].maxAvail;
-    }
-
-    for (size_t i = 0; i < deletedPool.size(); i++) {
-        uint32_t poolId = deletedPool[i];
-        std::map<uint32_t, PoolUsageInfo>::iterator delIter = poolInfoMap.find(poolId);
-        if (delIter != poolInfoMap.end()) {
-            poolInfoMap.erase(delIter);
-        }
-    }
+    poolList.swap(tmpList);
     tmpPoolInfoMap.clear();
-    tempPoolList.clear();
+    mutex.unlock();
 
-    int32_t ret = FirstReportAllPool();
-    if (ret != 0) {
-        ProxyDbgLogErr("report all pool failed.");
-        mutex.unlock();
-        return -1;
-    }
-
-    ret = ReportPoolNewAndDel(newPool, deletedPool);
+    int32_t ret = ReportPoolNewAndDel(tmpList);
     if (ret != 0) {
         ProxyDbgLogErr("report pool new or del failed.");
-        mutex.unlock();
         return -1;
     }
 
-    mutex.unlock();
     return 0;
 }
 
@@ -332,12 +294,14 @@ int PoolUsageStat::UpdatePoolUsage(void)
         return ret;
     }
 
+    //
     ret = GetPoolStorageUsage(this, outbl.c_str());
     if (ret != 0) {
         ProxyDbgLogErr("get pool storage usage failed: %d", ret);
         return -1;
     }
 
+    //
     ret = UpdatePoolList();
     if (ret != 0) {
         ProxyDbgLogErr("get pool storage usage failed: %d", ret);
@@ -345,16 +309,6 @@ int PoolUsageStat::UpdatePoolUsage(void)
     }
 
     return 0;
-}
-
-int PoolUsageStat::RegisterPoolDelNotifyFn(NotifyPoolEventFn fn)
-{
-    if (ccm_adaptor == NULL) {
-        ProxyDbgLogErr("poolUsageStat is not inited.");
-        return -1;
-    }
-
-    return ccm_adaptor->RegisterPoolDeleteReportFn(fn);
 }
 
 int PoolUsageStat::RegisterPoolNewNotifyFn(NotifyPoolEventFn fn)
@@ -370,9 +324,6 @@ int PoolUsageStat::RegisterPoolNewNotifyFn(NotifyPoolEventFn fn)
         return -1;
     }
 
-    mutex.lock_shared();
-    poolNewNotifyFnFirstRegistered = true;
-    mutex.unlock_shared();
     return 0;
 }
 
@@ -385,7 +336,6 @@ uint32_t PoolUsageStat::GetTimeInterval()
 {
     return timeInterval;
 }
-
 
 static void PoolUsageTimer(PoolUsageStat *poolUsageManager)
 {

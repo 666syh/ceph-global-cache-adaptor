@@ -26,6 +26,11 @@ struct QosParam {
     uint32_t limitWrite { 0 };
     uint32_t getQuotaCycle { 200 };
     uint32_t enableThrottle { 0 };
+    uint64_t saOpThrottle { 5000 };
+    uint64_t writeOpThrottle { 5000 };
+    uint64_t readOpThrottle { 5000 };
+    uint64_t writeBWThrottle { 1024000 };
+    uint64_t readBWThrottle { 1024000 };
 };
 
 typedef struct CloneInfo {
@@ -101,18 +106,18 @@ class NetworkModule {
     std::mutex limitWriteMtx;
     std::condition_variable limitWriteCond {};
 
-
-
+    volatile int lwtCount { 0 };
+    std::mutex lwtCountMtx;
+    volatile int lwtWriteCount { 0 };
+    std::mutex lwtWriteCountMtx;
+    volatile int lwtReadCount { 0 };
+    std::mutex lwtReadCountMtx;
+    volatile uint64_t writeBW { 0 };
+    std::mutex writeBWMtx;
+    volatile uint64_t readBW { 0 };
+    std::mutex readBWMtx;
 
     int InitMessenger();
-
-
-
-
-
-
-
-
 
     int FinishMessenger();
 
@@ -160,36 +165,10 @@ public:
         }
     }
 
-
-
-
-
-
-
-
-
-
-
     int InitNetworkModule(const std::string &rAddr, const std::vector<std::string> &rPort, const std::string &sAddr,
         const std::string &sPort, int *bind);
 
-
-
-
-
-
-
-
-
     int FinishNetworkModule();
-
-
-
-
-
-
-
-
 
     int ThreadFuncBodyServer();
 
@@ -204,15 +183,35 @@ public:
 
     void SetQosParam(const QosParam &p);
     void LimitWrite(const MOSDOp &op);
+    void Getlwt(unsigned int c = 1);
+    void Putlwt();
+    void GetlwtCas(unsigned int c = 1);
+    void PutlwtCas();
+    void GetWritelwt(unsigned int c = 1);
+    void PutWritelwt();
+    void GetWritelwtCas(unsigned int c = 1);
+    void PutWritelwtCas();
+    void GetReadlwt(unsigned int c = 1);
+    void PutReadlwt();
+    void GetReadlwtCas(unsigned int c = 1);
+    void PutReadlwtCas();
+    void GetWriteBW(unsigned long int c);
+    void PutWriteBW(unsigned long int c);
+    void GetWriteBWCas(unsigned long int c);
+    void PutWriteBWCas(unsigned long int c);
+    void GetReadBW(unsigned long int c);
+    void PutReadBW(unsigned long int c);
+    void GetReadBWCas(unsigned long int c);
+    void PutReadBWCas(unsigned long int c);
 };
 
-void FinishCacheOps(void *op, int32_t r);
+void FinishCacheOps(void *op, uint32_t optionType, uint64_t optionLength, int32_t r);
 void ProcessBuf(const char *buf, uint32_t len, int cnt, void *p);
 
 void EncodeOmapGetkeys(const SaBatchKeys *batchKeys, int i, MOSDOp *p);
 void EncodeOmapGetvals(const SaBatchKv *KVs, int i, MOSDOp *mosdop);
 void EncodeOmapGetvalsbykeys(const SaBatchKv *keyValue, int i, MOSDOp *mosdop);
-void EncodeRead(uint64_t opType, unsigned int offset, unsigned int len, char *buf, unsigned int bufLen, int i,
+void EncodeRead(uint64_t opType, unsigned int offset, unsigned int len, const char *buf, unsigned int bufLen, int i,
     MOSDOp *mosdop);
 void SetOpResult(int i, int32_t ret, MOSDOp *op);
 void EncodeXattrGetXattr(const SaBatchKv *keyValue, int i, MOSDOp *mosdop);

@@ -55,7 +55,7 @@ int rpc_init()
 
 bool IsDigit(const char *c, uint32_t length)
 {
-   for ( int i = 0; i < length; i++) {
+   for (uint32_t i = 0; i < length; i++) {
 	if (c[i] < '0' || c[i] > '9') {
 	    return false;
 	}
@@ -121,7 +121,7 @@ int OSA_Init(SaExport &sa)
     InitSalog(sa);
     char curDate[128] = {0};
     memset(curDate, 0, sizeof(curDate));
-    string strDate = "220321-";
+    string strDate = "220326-";
     strcpy(curDate, strDate.c_str());
 #ifdef NDEBUG
     Salog(LV_WARNING, LOG_TYPE, "OSA_Init %sR", curDate);
@@ -216,11 +216,37 @@ int OSA_Init(SaExport &sa)
     qos.limitWrite = readConfig.GetWriteQoS();
     qos.getQuotaCycle = readConfig.GetQuotCyc();
     qos.enableThrottle = readConfig.GetMessengerThrottle();
-    Salog(LV_WARNING, LOG_TYPE, "SA QoS limitWrite=%d, time_cyc=%d ms, enableThrottle=%d", qos.limitWrite, qos.getQuotaCycle,
-        qos.enableThrottle);
+    qos.saOpThrottle = readConfig.GetSaOpThrottle();
+    qos.writeOpThrottle = readConfig.GetWriteOpThrottle();
+    qos.readOpThrottle = readConfig.GetReadOpThrottle();
+    qos.writeBWThrottle = readConfig.GetWriteBWThrottle();
+    qos.readBWThrottle = readConfig.GetReadBWThrottle();
+    Salog(LV_WARNING, LOG_TYPE, "SA QoS limitWrite=%d, time_cyc=%d ms, enableThrottle=%d, opThrottle=%lu, writeOpThrottle=%lu, "
+        "readOpThrottle=%lu, writeBWThrottle=%lu, readBWThrottle=%lu", qos.limitWrite, qos.getQuotaCycle, qos.enableThrottle,
+        qos.saOpThrottle, qos.writeOpThrottle, qos.readOpThrottle, qos.writeBWThrottle, qos.readBWThrottle);
 
     if (qos.getQuotaCycle < 1) {
         Salog(LV_CRITICAL, LOG_TYPE, "error : get quota cycle is %d", qos.getQuotaCycle);
+        return ERROR_PORT;
+    }
+    if ((qos.saOpThrottle != 0) && (qos.saOpThrottle < 2000 || qos.saOpThrottle > 30000)) {
+        Salog(LV_CRITICAL, LOG_TYPE, "error : get quota cycle is %d, should in {0, [2000~30000]}", qos.saOpThrottle);
+        return ERROR_PORT;
+    }
+    if ((qos.writeOpThrottle != 0) && (qos.writeOpThrottle < 10 || qos.writeOpThrottle > 10000)) {
+        Salog(LV_CRITICAL, LOG_TYPE, "error : write op throttle is %d, should in {0, [10~10000]}", qos.writeOpThrottle);
+        return ERROR_PORT;
+    }
+    if ((qos.readOpThrottle != 0) && (qos.readOpThrottle < 10 || qos.readOpThrottle > 10000)) {
+        Salog(LV_CRITICAL, LOG_TYPE, "error : read op throttle is %d, should in {0, [10~10000]}", qos.readOpThrottle);
+        return ERROR_PORT;
+    }
+    if ((qos.writeBWThrottle != 0) && (qos.writeBWThrottle < 10 || qos.writeBWThrottle > 102400)) {
+        Salog(LV_CRITICAL, LOG_TYPE, "error : write bw throttle is %d, should in {0, [10~102400]}", qos.writeBWThrottle);
+        return ERROR_PORT;
+    }
+    if ((qos.readBWThrottle != 0) && (qos.readBWThrottle < 10 || qos.readBWThrottle > 102400)) {
+        Salog(LV_CRITICAL, LOG_TYPE, "error : read bw throttle is %d, should in {0, [10~102400]}", qos.readBWThrottle);
         return ERROR_PORT;
     }
 
@@ -291,10 +317,10 @@ int OSA_Finish()
     return ret;
 }
 
-int OSA_FinishCacheOps(void *p, int r)
+int OSA_FinishCacheOps(void *p, unsigned long int t, unsigned long int l, int r)
 {
     int ret= 0;
-    FinishCacheOps(p, r);
+    FinishCacheOps(p, t, l, r);
     return ret;
 }
 
@@ -374,26 +400,32 @@ int OSA_ExecClass(SaOpContext *pctx, PREFETCH_FUNC prefetch)
 	return -EINVAL;
     }
     if (cname.compare("rpc") == 0 && mname.compare("das_prefetch") == 0) {
-	uint64_t offset;
-	uint64_t len;
-	auto bp = indata.cbegin();
-	decode(offset, bp);
-	decode(len, bp);
-	OpRequestOps &osdop = pOpReq->vecOps[pctx->opId];
+        uint64_t offset;
+        uint64_t len;
+        auto bp = indata.cbegin();
+        decode(offset, bp);
+        decode(len, bp);
+        OpRequestOps &osdop = pOpReq->vecOps[pctx->opId];
 
-	osdop.objOffset = offset;
-	osdop.objLength = len;
-	return prefetch(pOpReq, &osdop);
+        osdop.objOffset = offset;
+        osdop.objLength = len;
+        return prefetch(*pOpReq, osdop);
     } else if (cname.compare("rbd") == 0 && mname.compare("copyup") == 0) {
-        if (cls_cxx_stat(pctx, NULL, NULL) == 0)
+        if (cls_cxx_stat2(pctx, NULL, NULL) == 0) {
+            Salog(LV_DEBUG, LOG_TYPE, "finish state, tid=%ld", pOpReq->tid);
+            *pOpReq->copyupFlag = 0;
             return 0;
-        return cls_cxx_write(pctx, 0, indata.length(), &indata);
+        }
+        int ret = cls_cxx_write(pctx, 0, indata.length(), &indata);
+        Salog(LV_DEBUG, LOG_TYPE, "finish write, tid=%ld", pOpReq->tid);
+        *pOpReq->copyupFlag = 0;
+        return ret;
     }
     ClassHandler::ClassData *cls;
     int ret = rpc_handler->open_class(cname, &cls);
     if ( ret) {
-	Salog(LV_ERROR,LOG_TYPE, "can't open class [%s] ret [%d]", cname.c_str(), ret);
-	return -EOPNOTSUPP;
+        Salog(LV_ERROR,LOG_TYPE, "can't open class [%s] ret [%d]", cname.c_str(), ret);
+        return -EOPNOTSUPP;
     }
 
     ClassHandler::ClassMethod *method = cls->get_method(mname.c_str());
