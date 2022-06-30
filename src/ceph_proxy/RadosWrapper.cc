@@ -1,4 +1,4 @@
-/* License:LGPL-2.1
+﻿/* License:LGPL-2.1
  *
  * Copyright (c) 2021 Huawei Technologies Co., Ltf All rights reserved.
  *
@@ -12,6 +12,7 @@
 #include "CephProxyLog.h"
 #include "ConfigRead.h"
 #include "CephProxy.h"
+
 #include <unistd.h>
 #include <stdio.h>
 #include <dirent.h>
@@ -420,7 +421,7 @@ int RadosGetPoolStat(rados_client_t client, rados_ioctx_t ctx, CephPoolStat *sta
 	return 0;
 }
 
-
+/* WriteOp */
 rados_op_t RadosWriteOpInit(const string& pool, const string &oid)
 {
 	uint64_t ts = 0;
@@ -432,6 +433,7 @@ rados_op_t RadosWriteOpInit(const string& pool, const string &oid)
 	}
 	rados_op_t op = reinterpret_cast<void *>(writeOp);
 	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_WRITEOP_INIT, ts, 0);
+
 	return op;
 }	
 
@@ -545,11 +547,14 @@ void RadosWriteOpWriteSGL(rados_op_t op, SGL_S *sgl, size_t len1, uint64_t off, 
 	uint32_t leftLen = len1;
 	uint32_t curSrcEntryIndex = 0;
 
+	//
 	if (alignBuffer != NULL &&
 		alignBuffer->prevAlignBuffer != NULL &&
 		alignBuffer->prevAlignLen != 0) {
 		writeOp->bl.append(alignBuffer->prevAlignBuffer, alignBuffer->prevAlignLen);
 	}
+
+	//
 	while(leftLen > 0){
 		size_t size = 0;
 		if (isRelease) {
@@ -565,6 +570,8 @@ void RadosWriteOpWriteSGL(rados_op_t op, SGL_S *sgl, size_t len1, uint64_t off, 
 			sgl = sgl->nextSgl;
 		}
 	}
+
+	//
 	if (alignBuffer != NULL &&
 		alignBuffer->backAlignBuffer != NULL &&
 		alignBuffer->backAlignLen != 0) {
@@ -662,7 +669,6 @@ void RadosWriteOpAppend(rados_op_t op, const char *buffer, size_t len)
 	int32_t ret = 0;
 	PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_OPINIT_APPEND, ts);
 	RadosObjectWriteOp *writeOp = reinterpret_cast<RadosObjectWriteOp *>(op);
-
 	writeOp->bl.append(buffer,len);
 	writeOp->op.append(writeOp->bl);
 	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_OPINIT_APPEND, ts, ret);
@@ -1011,6 +1017,7 @@ void RadosReadOpRead(rados_op_t op, uint64_t offset, size_t len, char *buffer,
 
     readOp->op.read(offset, len, &(readOp->results), prval);
 	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_OPINIT_READ, ts, ret);
+
 }
 
 void RadosReadOpReadSGL(rados_op_t op, uint64_t offset,size_t len, SGL_S *sgl, int *prval, int isRelease)
@@ -1082,41 +1089,60 @@ void ReadCallback(rados_completion_t c, void *arg)
 {
     RadosObjectReadOp *readOp = (RadosObjectReadOp *)arg;
     int ret = rados_aio_get_return_value(c);
-    if (ret == 0 && readOp->results.length() > 0) {
-	if (readOp->reqCtx.read.buffer != nullptr) {   
+    if (ret == 0) {
+	    if (readOp->reqCtx.read.buffer != nullptr) {   
+			// std::cerr << "readOp->results.length = " << readOp->results.length() << std::endl;
+			memcpy(readOp->reqCtx.read.buffer, readOp->results.c_str(), readOp->results.length());
+	    } else if (readOp->reqCtx.readSgl.sgl != nullptr) {
+		    if (readOp->results.length() != readOp->reqCtx.readSgl.len) {
+			    uint16_t current_entry = 0;
+			    SGL_S * sgl = readOp->reqCtx.readSgl.sgl;
+			    while (sgl != NULL) {
+				    while (current_entry < sgl->entrySumInSgl) {
+					    memset((sgl->entrys[current_entry].buf), 0, sgl->entrys[current_entry].len);
+					    current_entry++;
+				    }
+				    sgl = sgl->nextSgl;
+				    current_entry = 0;
+			    }
+		    }
 
-	    memcpy(readOp->reqCtx.read.buffer, readOp->results.c_str(), readOp->results.length());
-	} else if (readOp->reqCtx.readSgl.sgl != nullptr) {
-	    size_t len = readOp->results.length();
-	    uint32_t leftLen = len;
-	    int curEntryIndex = 0;
-	    uint64_t offset = 0;
-	    SGL_S *sgl = readOp->reqCtx.readSgl.sgl;
-	    int buildType = readOp->reqCtx.readSgl.buildType;
+	        size_t len = readOp->results.length();
+	        uint32_t leftLen = len;
+	        int curEntryIndex = 0;
+	        uint64_t offset = 0;
+	        SGL_S *sgl = readOp->reqCtx.readSgl.sgl;
+	        int buildType = readOp->reqCtx.readSgl.buildType;
   
- 	    while (leftLen > 0) {
-		size_t size = 0;
-		if (buildType) {
-			size = std::min((uint32_t)DEFAULT_SGL_PAGE, leftLen);
-		} else {
-			size = std::min(sgl->entrys[curEntryIndex].len, leftLen);
-		}
+ 	        while (leftLen > 0) {
+		        size_t size = 0;
+		        if (buildType) {
+			        size = std::min((uint32_t)DEFAULT_SGL_PAGE, leftLen);
+		        } else {
+			        size = std::min(sgl->entrys[curEntryIndex].len, leftLen);
+		        }
 
-		bufferlist bl;
-		bl.substr_of(readOp->results, offset, size);
-		memcpy(sgl->entrys[curEntryIndex].buf, bl.c_str(), size);
-		leftLen -= size;
-		curEntryIndex++;
-		if (curEntryIndex >= ENTRY_PER_SGL) {
-		    curEntryIndex = 0;
-		    sgl = sgl->nextSgl;
-		}
+		        bufferlist bl;
+		        bl.substr_of(readOp->results, offset, size);
+		        memcpy(sgl->entrys[curEntryIndex].buf, bl.c_str(), size);
+		        leftLen -= size;
+		        curEntryIndex++;
+		        if (curEntryIndex >= ENTRY_PER_SGL) {
+		            curEntryIndex = 0;
+		            sgl = sgl->nextSgl;
+		        }
 
-		offset += size;
+		        offset += size;
+	        }
 	    }
+	} else {
+		if (ret == -2) {
+			ProxyDbgLogWarn("pool(%ld) or objects(%s) is not exists: %d", readOp->poolId, readOp->objectId.c_str(), ret);
+		} else {
+			ProxyDbgLogErr("read pool(%ld) or objects(%s) failed: %d", readOp->poolId, readOp->objectId.c_str(), ret);
+		}
 	}
-    }
-    
+
     if (ret == 0 && readOp->reqCtx.xattr.name != nullptr) {
 	memcpy(*(readOp->reqCtx.xattr.vals),
 		readOp->xattrs[readOp->reqCtx.xattr.name].c_str(),
@@ -1144,6 +1170,7 @@ void ReadCallback(rados_completion_t c, void *arg)
 		readOp->reqCtx.checksum.chunkSumLen);
     }
     
+	// TODO: other reqCtx;
 	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_READ, readOp->ts, ret);
 
 	uint64_t ts = 0;
@@ -1152,32 +1179,10 @@ void ReadCallback(rados_completion_t c, void *arg)
 	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_RDCB, ts, ret);
 }
 
-static void PoolDeleteProc()
-{
-	ceph_proxy_t proxy = GetCephProxyInstance();
-	if (proxy == nullptr) {
-		ProxyDbgLogErr("get cephProxyInstance failed.");
-		return;
-	}
-
-	CephProxy *cephProxy = (CephProxy *)proxy;
-	int32_t ret = cephProxy->poolStatManager->UpdatePoolUsage();
-	if (ret != 0) {
-		ProxyDbgLogErr("UpdatePoolUsage failed.");
-		return;
-	}
-}
-
-static void TriggerPoolDelete(void)
-{
-	std::thread proc(PoolDeleteProc);
-	proc.detach();
-}
-
 void WriteCallback(rados_completion_t c, void *arg)
 {
 	RadosObjectWriteOp *writeOp = (RadosObjectWriteOp *)arg;
-
+	// TODO: other reqCtx;
 	int ret = rados_aio_get_return_value(c);
 	uint64_t completeTs = writeOp->ts;
 	uint64_t ts = 0;
@@ -1186,15 +1191,11 @@ void WriteCallback(rados_completion_t c, void *arg)
 	if (ret == 0) {
 		ProxyDbgLogDebug("write ret is %d", ret);
 	} else if (ret == -2) {
-#if 0
-		if (writeOp->isRemove == false) {
-			TriggerPoolDelete();
-		}
-#endif
 		ProxyDbgLogWarnLimit1("pool(object) is not exists");
 	} else {
 		ProxyDbgLogErr("write ret is %d", ret);
 	}
+
 	writeOp->callback(ret, writeOp->cbArg);
 	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_WRCB, ts, ret);
 	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_WRITE, completeTs, ret);
@@ -1290,4 +1291,3 @@ bool ceph_status()
 #ifdef __cplusplus
 }
 #endif
-

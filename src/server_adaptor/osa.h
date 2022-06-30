@@ -17,7 +17,7 @@ extern "C" {
 class SaExport;
 int OSA_Init(SaExport &sa);
 int OSA_Finish();
-int OSA_FinishCacheOps(void *p, int r);
+int OSA_FinishCacheOps(void *p, unsigned long int t, unsigned long int l, int r);
 void OSA_ProcessBuf(const char *buf, unsigned int len, int cnt, void *p);
 
 void OSA_EncodeOmapGetkeys(const SaBatchKeys *batchKeys, int i, void *p);

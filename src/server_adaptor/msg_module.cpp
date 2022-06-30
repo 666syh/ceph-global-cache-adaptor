@@ -36,7 +36,7 @@ static void decode_str_str_map_to_bl(bufferlist::const_iterator &p, bufferlist *
     start.copy(len, *out);
 }
 
-int MsgModule::ConvertClientopToOpreq(OSDOp &clientop, OpRequestOps &oneOp, OptionsType &optionType)
+int MsgModule::ConvertClientopToOpreq(OSDOp &clientop, OpRequestOps &oneOp, OptionsType &optionType, OptionsLength &optionLength)
 {
     int ret = 0;
     oneOp.opSubType = clientop.op.op;
@@ -45,16 +45,18 @@ int MsgModule::ConvertClientopToOpreq(OSDOp &clientop, OpRequestOps &oneOp, Opti
         case CEPH_OSD_OP_SPARSE_READ:
         case CEPH_OSD_OP_SYNC_READ:
         case CEPH_OSD_OP_READ: {
-	    optionType.read++;
-	    oneOp.objOffset = clientop.op.extent.offset;
-	    oneOp.objLength = clientop.op.extent.length;
-	    Salog(LV_DEBUG, LOG_TYPE, "ConvertClientopToOpreq READ obj=%s type=0x%lX offset=0x%X length=0x%X",
-		oneOp.objName.c_str(), oneOp.opSubType, oneOp.objOffset, oneOp.objLength);
-	    ConvertObjRw(clientop, oneOp);
+            optionType.read++;
+            optionLength.read += clientop.op.extent.length / 1024;
+            oneOp.objOffset = clientop.op.extent.offset;
+            oneOp.objLength = clientop.op.extent.length;
+            Salog(LV_DEBUG, LOG_TYPE, "ConvertClientopToOpreq READ obj=%s type=0x%lX offset=0x%X length=0x%X",
+            oneOp.objName.c_str(), oneOp.opSubType, oneOp.objOffset, oneOp.objLength);
+            ConvertObjRw(clientop, oneOp);
     	} break;
         case CEPH_OSD_OP_WRITEFULL:
         case CEPH_OSD_OP_WRITE: {
-	    optionType.write++;					
+	        optionType.write++;
+            optionLength.write += clientop.op.extent.length / 1024;		
             oneOp.objOffset = clientop.op.extent.offset;
             oneOp.objLength = clientop.op.extent.length;
             Salog(LV_DEBUG, LOG_TYPE, 
@@ -119,7 +121,20 @@ int MsgModule::ConvertClientopToOpreq(OSDOp &clientop, OpRequestOps &oneOp, Opti
         } break;
         case CEPH_OSD_OP_GETXATTRS:
         case CEPH_OSD_OP_STAT:
-        case CEPH_OSD_OP_CALL:
+            break;
+        case CEPH_OSD_OP_CALL: {
+            string cname, mname;
+            auto bp = clientop.indata.cbegin();
+            try {
+                bp.copy(clientop.op.cls.class_len, cname);
+                bp.copy(clientop.op.cls.method_len, mname);
+            } catch (buffer::error &e) {
+                Salog(LV_ERROR, LOG_TYPE, "unable to decode class [%s] + method[%s]", cname.c_str(), mname.c_str());
+            }
+            if (cname.compare("rbd") == 0 && mname.compare("copyup") == 0) {
+                ret = 1;
+            } 
+        } break;
         case CEPH_OSD_OP_LIST_SNAPS:
             break;
         case CEPH_OSD_OP_CREATE:

@@ -21,11 +21,15 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
-
+#include <sys/sysinfo.h>
+#include <salog.h>
 // #include "common.h"
 
 #define CLUSTER_CONFIG_FILE "/home/config_sa.conf"
 #define CONFIG_BUFFSIZE 500
+#define CPU_NUM_64 (64)
+#define CPU_NUM_96 (96)
+#define CPU_NUM_128 (128)
 #define MAX_CPU_NUM (256)
 
 static const char *LOCAL_IPV4_ADDR = "local_ipv4_addr";
@@ -42,19 +46,25 @@ static const char *LISTEN_PORT = "listen_port";
 static const char *SEND_IP = "send_ip";
 static const char *SEND_PORT = "send_port";
 static const char *TEST_MODE = "test_mode";
-static const char *CORE_NUMBER = "core_number";
+static const char *CORE_NUMBER_64 = "core_number_64";
+static const char* CORE_NUMBER_96 = "core_number_96";
+static const char* CORE_NUMBER_128 = "core_number_128";
+static const char* CORE_NUMBER_256 = "core_number_256";
+
 static const char *QUEUE_AMOUNT = "queue_amount";
 static const char *QUEUE_MAX_CAPACITY = "queue_max_capacity";
 static const char *MSGR_AMOUNT = "msgr_amount";
 static const char *BIND_CORE = "bind_core";
 static const char *BIND_QUEUE_CORE = "bind_queue_core";
-static const char *PERF = "perf";
 
 static const char *WRITE_QOS = "write_qos";
 static const char *GET_QUOTA_CYC = "get_quota_cyc";
 static const char *GET_MESSENGER_THROTTLE = "enable_messenger_throttle";
-
-
+static const char* SA_OP_THROTTLE = "sa_op_throttle";
+static const char* WRITE_OP_THROTTLE = "write_op_throttle";
+static const char* READ_OP_THROTTLE = "read_op_throttle";
+static const char* WRITE_BW_THROTTLE = "write_bw_throttle";
+static const char* READ_BW_THROTTLE = "read_bw_throttle";
 #ifndef RETURN_OK
 #define RETURN_OK 0
 #endif
@@ -92,6 +102,11 @@ typedef struct {
 	uint64_t writeOoS{0};
 	uint64_t getQuotaCyc{0};
 	uint64_t getMessengerThrottle {0};
+	uint64_t saOpThrottle{ 0 };
+	uint64_t writeOpThrottle{ 0 };
+	uint64_t readOpThrottle{ 0 };
+	uint64_t writeBWThrottle{ 0 };
+	uint64_t readBWThrottle{ 0 };
 } SA_ClusterControlCfg;
 
 SA_ClusterControlCfg g_SaClusterControlCfg = { 0 };
@@ -277,6 +292,44 @@ static int32_t ParseCoreConfig(char *str, uint32_t *cores, uint8_t maxCoreNum)
 	return RETURN_OK;
 }
 
+//
+static int32_t GetSysCpuNum()
+{
+	int32_t cpuNum = get_nprocs_conf();
+	Salog(LV_INFORMATION, LOG_TYPE, "GetCpuNum %d", cpuNum);
+	return cpuNum;
+}
+
+static int32_t CheckAndSetCoreNumber(uint8_t* str, bool* find)
+{
+	uint8_t* value;
+	int32_t cpuNum = GetSysCpuNum();
+
+	if (cpuNum < CPU_NUM_96) {
+		value = SearchSubString(str, CORE_NUMBER_64);
+	}
+	else if (cpuNum < CPU_NUM_128) {
+		value = SearchSubString(str, CORE_NUMBER_96);
+	}
+	else if (cpuNum < MAX_CPU_NUM) {
+		value = SearchSubString(str, CORE_NUMBER_128);
+	} else {
+		value = SearchSubString(str, CORE_NUMBER_256);
+	}
+
+	if(value != NULL) {
+		ConfigTrim(value);
+		if (strlen((char*)value) >= MAX_PORT_SIZE) {
+			Salog(LV_ERROR, LOG_TYPE, "Server adaptor core num(%d) over MAX_PORT_SIZE(%d) %d",
+				strlen((char*)value), MAX_PORT_SIZE);
+			return RETURN_ERROR;
+		}
+		strcpy(g_SaClusterControlCfg.coreNumber, (char*)value);
+		*find = true;
+	}
+	return RETURN_OK;
+}
+
 static int32_t AnalyzeSubString(uint8_t *str)
 {
 	uint8_t *value;
@@ -377,14 +430,11 @@ static int32_t AnalyzeSubString(uint8_t *str)
 		 strcpy(g_SaClusterControlCfg.testMode, (char *)value);
 		 return RETURN_OK;
 	}       
-	value = SearchSubString(str, CORE_NUMBER);
-	if (value != NULL) {
-		ConfigTrim(value);
-		 if (strlen((char *)value) >= MAX_PORT_SIZE) {
-			 return RETURN_ERROR;
-		 }
-		 strcpy(g_SaClusterControlCfg.coreNumber, (char *)value);
-		 return RETURN_OK;
+	bool find = false;
+	int ret = 0;
+	ret = CheckAndSetCoreNumber(str, &find);
+	if (find == true) {
+		 return ret;
 	}       
 	value = SearchSubString(str, QUEUE_AMOUNT);
 	if (value != NULL) {
@@ -411,7 +461,6 @@ static int32_t AnalyzeSubString(uint8_t *str)
 		ConfigTrim(value);
 		return TransformValueToInt(value, &g_SaClusterControlCfg.bindQueueCore);
 	}
-
 	value = SearchSubString(str, WRITE_QOS);
 	if (value != NULL){
 		ConfigTrim(value);
@@ -426,6 +475,31 @@ static int32_t AnalyzeSubString(uint8_t *str)
 	if (value != NULL) {
 		ConfigTrim(value);
 		return TransformValueToInt(value,&g_SaClusterControlCfg.getMessengerThrottle);
+	}
+	value = SearchSubString(str, SA_OP_THROTTLE);
+	if (value != NULL) {
+		ConfigTrim(value);
+		return TransformValueToInt(value, &g_SaClusterControlCfg.saOpThrottle);
+	}
+	value = SearchSubString(str, WRITE_OP_THROTTLE);
+	if (value != NULL) {
+		ConfigTrim(value);
+		return TransformValueToInt(value, &g_SaClusterControlCfg.writeOpThrottle);
+	}
+	value = SearchSubString(str, READ_OP_THROTTLE);
+	if (value != NULL) {
+		ConfigTrim(value);
+		return TransformValueToInt(value, &g_SaClusterControlCfg.readOpThrottle);
+	}
+	value = SearchSubString(str, WRITE_BW_THROTTLE);
+	if (value != NULL) {
+		ConfigTrim(value);
+		return TransformValueToInt(value, &g_SaClusterControlCfg.writeBWThrottle);
+	}
+	value = SearchSubString(str, READ_BW_THROTTLE);
+	if (value != NULL) {
+		ConfigTrim(value);
+		return TransformValueToInt(value, &g_SaClusterControlCfg.readBWThrottle);
 	}
 	return RETURN_OK;
 }
@@ -569,7 +643,26 @@ uint32_t OsaConfigRead::GetMessengerThrottle()
 {
 	return g_SaClusterControlCfg.getMessengerThrottle;
 }
-
+uint64_t OsaConfigRead::GetSaOpThrottle()
+{
+	return g_SaClusterControlCfg.saOpThrottle;
+}
+uint64_t OsaConfigRead::GetWriteOpThrottle()
+{
+	return g_SaClusterControlCfg.writeOpThrottle;
+}
+uint64_t OsaConfigRead::GetReadOpThrottle()
+{
+	return g_SaClusterControlCfg.readOpThrottle;
+}
+uint64_t OsaConfigRead::GetWriteBWThrottle()
+{
+	return g_SaClusterControlCfg.writeBWThrottle;
+}
+uint64_t OsaConfigRead::GetReadBWThrottle()
+{
+	return g_SaClusterControlCfg.readBWThrottle;
+}
 
 static int32_t CopyCores(uint32_t *destCores, uint32_t maxCoreNum, uint32_t *srcCores, uint32_t maxSrcCoreNum)
 {
@@ -585,6 +678,7 @@ static int32_t CopyCores(uint32_t *destCores, uint32_t maxCoreNum, uint32_t *src
 			break;
 		}
 	}
+	return 0;
 }
 
 int32_t OsaConfigRead::GetIodCore(uint32_t *cores, uint32_t maxCoreNum)

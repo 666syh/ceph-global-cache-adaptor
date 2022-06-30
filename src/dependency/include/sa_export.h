@@ -39,10 +39,10 @@ public :
     void SetConfPath(const std::string &path);
     std::string GetConfPath();
 
-    void FtdsStartNormal(unsigned int id, uint64_t ts);
-    void FtdsEndNormal(unsigned int id, uint64_t ts, int ret);
-    void FtdsStartHigh(unsigned int id, uint64_t ts);
-    void FtdsEndHigt(unsigned int id, uint64_t ts, int ret);
+    void FtdsStartNormal(unsigned int id, const char *idName, uint64_t &ts);
+    void FtdsEndNormal(unsigned int id, const char *idName, uint64_t &ts, int ret);
+    void FtdsStartHigh(unsigned int id, const char *idName, uint64_t &ts);
+    void FtdsEndHigt(unsigned int id, const char *idName, uint64_t &ts, int ret);
 
     void GetWriteQuota(unsigned int poolId, SaWcacheQosInfo &info);
 };

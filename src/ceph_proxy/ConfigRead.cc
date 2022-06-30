@@ -248,7 +248,7 @@ static int32_t AnalyzeSubString(uint8_t *str)
     value = SearchSubString(str, CEPH_CONF_PATH);
     if (value != NULL) {
 	ConfigTrim(value);
-	ProxyDbgLogInfo("read config: %s, value: %s", CEPH_CONF_PATH, value);
+	ProxyDbgLogInfo(">ead config: %s, value: %s", CEPH_CONF_PATH, value);
     if(strncpy(g_ProxyCfg.cephConfPath, (char *)value, MAX_PATH_LEN) == NULL) {
         ProxyDbgLogErr("strncpy failed.");
         return RETURN_ERROR;

@@ -19,6 +19,7 @@
 
 #include <string>
 #include <vector>
+#include <atomic>
 
 constexpr int MY_PID = 666;
 
@@ -41,6 +42,10 @@ constexpr int SA_QOS_MAX_NUM = 200;
 struct OptionsType {
     uint32_t write;
     uint32_t read;
+};
+struct OptionsLength {
+    uint64_t write;
+    uint64_t read;
 };
 
 struct RbdObjid {
@@ -91,9 +96,12 @@ struct SaOpReq {
     std::vector<OpRequestOps> vecOps;
 
     uint32_t optionType { 0 };
+    uint64_t optionLength { 0 };
     uint64_t opType { 0 };
 
     uint64_t snapId { 0 };
+
+    long tid { 0 };
 
     uint64_t opsSequence { 0 };
     void *ptrMosdop { nullptr };
@@ -107,39 +115,51 @@ struct SaOpReq {
     uint64_t snapSeq { 0 };
     std::vector<uint64_t> snaps {};
 
+    int exitsCopyUp { 0 };
+
+    std::atomic<int> *copyupFlag { nullptr };
+
     uint64_t ptVersion { 0 };
     SaOpReq &operator = (const struct SaOpReq &other)
     {
-	if (this == &other) {
-	    return *this;
-	}
-	optionType = other.optionType;
-	opType = other.opType;
-	snapId = other.snapId;
-	opsSequence = other.opsSequence;
-	ptrMosdop = other.ptrMosdop;
-	ptId = other.ptId;
-	poolId = other.poolId;
-	ts = other.ts;
-    snapSeq = other.snapSeq;
-    snaps = other.snaps;
-    ptVersion = other.ptVersion;
-	return *this;
+        if (this == &other) {
+            return *this;
+        }
+        optionType = other.optionType;
+        optionLength = other.optionLength;
+        opType = other.opType;
+        snapId = other.snapId;
+        opsSequence = other.opsSequence;
+        ptrMosdop = other.ptrMosdop;
+        tid = other.tid;
+        ptId = other.ptId;
+        poolId = other.poolId;
+        ts = other.ts;
+        snapSeq = other.snapSeq;
+        snaps = other.snaps;
+        exitsCopyUp = other.exitsCopyUp;
+        copyupFlag = other.copyupFlag;
+        ptVersion = other.ptVersion;
+        return *this;
     }
 
     SaOpReq(const struct SaOpReq &other)
     {
         optionType=other.optionType;
-	opType=other.opType;
-	snapId=other.snapId;
-	opsSequence=other.opsSequence;
-	ptrMosdop=other.ptrMosdop;
-	ptId=other.ptId;
-	poolId=other.poolId;
-	ts=other.ts;
-    snapSeq = other.snapSeq;
-    snaps = other.snaps;
-    ptVersion = other.ptVersion;
+        optionLength = other.optionLength;
+        opType=other.opType;
+        snapId=other.snapId;
+        opsSequence=other.opsSequence;
+        ptrMosdop=other.ptrMosdop;
+        tid = other.tid;
+        ptId=other.ptId;
+        poolId=other.poolId;
+        ts=other.ts;
+        snapSeq = other.snapSeq;
+        snaps = other.snaps;
+        exitsCopyUp = other.exitsCopyUp;
+        copyupFlag = other.copyupFlag;
+        ptVersion = other.ptVersion;
     }
     SaOpReq() {}
 };
@@ -147,10 +167,10 @@ struct SaOpReq {
 struct SaOpContext {
     struct SaOpReq *opReq;
     int opId;
-    int (*cbFunc)(struct SaOpReq *opReq);
+    int (*cbFunc)(struct SaOpReq &opReq);
 };
 
-using PREFETCH_FUNC = int (*)(struct SaOpReq *opReq, OpRequestOps *osdop);
+using PREFETCH_FUNC = int (*)(struct SaOpReq &opReq, OpRequestOps &osdop);
 
 struct SaStr {
     uint32_t len;
@@ -181,6 +201,11 @@ struct SaWcacheQosInfo {
     uint16_t ptList[SA_QOS_MAX_NUM];
     uint32_t ptUseRatio[SA_QOS_MAX_NUM];
 };
+
+constexpr int GetQosMaxNum()
+{
+    return SA_QOS_MAX_NUM;
+}
 
 #endif
 
