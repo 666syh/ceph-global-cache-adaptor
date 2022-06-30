@@ -742,10 +742,10 @@ index 0000000..009901b
 +
 diff --git a/src/client_adaptor/ClientAdaptorMsg.h b/src/client_adaptor/ClientAdaptorMsg.h
 new file mode 100644
-index 0000000..585d06d
+index 0000000..19058c3
 --- /dev/null
 +++ b/src/client_adaptor/ClientAdaptorMsg.h
-@@ -0,0 +1,77 @@
+@@ -0,0 +1,78 @@
 +/* License:LGPL-2.1
 +*
 +* Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
@@ -819,6 +819,7 @@ index 0000000..585d06d
 +  bool valid_ip(string ip_addr);
 +public:
 +  std::unordered_set<void *> connections;
++  mutable std::shared_mutex connlock;
 +};
 +
 +
@@ -2335,7 +2336,7 @@ index 5b914cc..301cc89 100644
    uint64_t state_offset;
    Worker *worker;
 diff --git a/src/msg/async/ProtocolV2.cc b/src/msg/async/ProtocolV2.cc
-index 4b03f5e..d5211fa 100644
+index 4b03f5e..4b05d5c 100644
 --- a/src/msg/async/ProtocolV2.cc
 +++ b/src/msg/async/ProtocolV2.cc
 @@ -13,6 +13,12 @@
@@ -2371,7 +2372,7 @@ index 4b03f5e..d5211fa 100644
      if (server_cookie) {
        connect_seq++;
      }
-@@ -1708,6 +1725,37 @@ CtPtr ProtocolV2::send_auth_request(std::vector<uint32_t> &allowed_methods) {
+@@ -1708,6 +1725,40 @@ CtPtr ProtocolV2::send_auth_request(std::vector<uint32_t> &allowed_methods) {
    vector<uint32_t> preferred_modes;
    auto am = auth_meta;
    connection->lock.unlock();
@@ -2379,7 +2380,10 @@ index 4b03f5e..d5211fa 100644
 +  PluginRegistry *reg = cct->get_plugin_registry();
 +  auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
 +  ceph_assert(plugin);
-+  if (plugin->msg_ref->connections.find(connection) != plugin->msg_ref->connections.end()) {
++  std::shared_lock<std::shared_mutex> rlock(plugin->msg_ref->connlock);
++  bool is_gc_conn = plugin->msg_ref->connections.find(connection) != plugin->msg_ref->connections.end();
++  rlock.unlock();
++  if (is_gc_conn) {
 +    ldout(cct, 3) << __func__ << " Client Adaptor: dummy get_auth_request. " << dendl;
 +    am->auth_method = CEPH_AUTH_NONE;
 +    preferred_modes = { CEPH_CON_MODE_CRC };
@@ -2409,7 +2413,7 @@ index 4b03f5e..d5211fa 100644
    int r = messenger->auth_client->get_auth_request(
      connection, am.get(),
      &am->auth_method, &preferred_modes, &bl);
-@@ -1723,6 +1771,7 @@ CtPtr ProtocolV2::send_auth_request(std::vector<uint32_t> &allowed_methods) {
+@@ -1723,6 +1774,7 @@ CtPtr ProtocolV2::send_auth_request(std::vector<uint32_t> &allowed_methods) {
      connection->dispatch_queue->queue_reset(connection);
      return nullptr;
    }
@@ -2417,7 +2421,7 @@ index 4b03f5e..d5211fa 100644
  
    INTERCEPT(9);
  
-@@ -1811,6 +1860,37 @@ CtPtr ProtocolV2::handle_auth_done(ceph::bufferlist &payload)
+@@ -1811,6 +1863,40 @@ CtPtr ProtocolV2::handle_auth_done(ceph::bufferlist &payload)
    ceph_assert(messenger->auth_client);
    auto am = auth_meta;
    connection->lock.unlock();
@@ -2425,7 +2429,10 @@ index 4b03f5e..d5211fa 100644
 +  PluginRegistry *reg = cct->get_plugin_registry();
 +  auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
 +  ceph_assert(plugin);
-+  if (plugin->msg_ref->connections.find(connection) != plugin->msg_ref->connections.end()) {
++  std::shared_lock<std::shared_mutex> rlock(plugin->msg_ref->connlock);
++  bool is_gc_conn = plugin->msg_ref->connections.find(connection) != plugin->msg_ref->connections.end();
++  rlock.unlock();
++  if (is_gc_conn) {
 +    ldout(cct, 3) << __func__ << " Client Adaptor: dummy handle_auth_done. " << dendl;
 +    connection->lock.lock();
 +    if (state != AUTH_CONNECTING) {
@@ -2455,7 +2462,7 @@ index 4b03f5e..d5211fa 100644
    int r = messenger->auth_client->handle_auth_done(
      connection,
      am.get(),
-@@ -1819,6 +1899,7 @@ CtPtr ProtocolV2::handle_auth_done(ceph::bufferlist &payload)
+@@ -1819,6 +1905,7 @@ CtPtr ProtocolV2::handle_auth_done(ceph::bufferlist &payload)
      auth_done.auth_payload(),
      &am->session_key,
      &am->connection_secret);
@@ -2463,7 +2470,7 @@ index 4b03f5e..d5211fa 100644
    connection->lock.lock();
    if (state != AUTH_CONNECTING) {
      ldout(cct, 1) << __func__ << " state changed!" << dendl;
-@@ -1827,6 +1908,7 @@ CtPtr ProtocolV2::handle_auth_done(ceph::bufferlist &payload)
+@@ -1827,6 +1914,7 @@ CtPtr ProtocolV2::handle_auth_done(ceph::bufferlist &payload)
    if (r < 0) {
      return _fault();
    }
@@ -2472,7 +2479,7 @@ index 4b03f5e..d5211fa 100644
    session_stream_handlers = \
      ceph::crypto::onwire::rxtx_t::create_handler_pair(cct, *auth_meta, false);
 diff --git a/src/osdc/Objecter.cc b/src/osdc/Objecter.cc
-index bc39114..7cc4ed7 100644
+index bc39114..63566bd 100644
 --- a/src/osdc/Objecter.cc
 +++ b/src/osdc/Objecter.cc
 @@ -51,6 +51,18 @@
@@ -2651,7 +2658,7 @@ index bc39114..7cc4ed7 100644
  	}
  
  	ceph_assert(e == osdmap->get_epoch());
-@@ -1772,6 +1882,53 @@ int Objecter::_get_session(int osd, OSDSession **session, shunique_lock& sul)
+@@ -1772,6 +1882,55 @@ int Objecter::_get_session(int osd, OSDSession **session, shunique_lock& sul)
      return 0;
    }
  
@@ -2692,10 +2699,12 @@ index bc39114..7cc4ed7 100644
 +    s = new OSDSession(cct, osd);
 +    osd_sessions[osd] = s;
 +    s->con = messenger->connect_to_osd(node_addrs);
++    std::unique_lock<std::shared_mutex> wlock(plugin->msg_ref->connlock);
 +    plugin->msg_ref->connections.insert((void*)(s->con.get()));
 +    for (auto it : plugin->msg_ref->connections) {
 +      ldout(cct, 3) << "Client Adaptor: con = " << it << dendl;
 +    }
++    wlock.unlock();
 +  } else {
 +    s = new OSDSession(cct, osd);
 +    osd_sessions[osd] = s;
@@ -2705,7 +2714,7 @@ index bc39114..7cc4ed7 100644
    map<int,OSDSession*>::iterator p = osd_sessions.find(osd);
    if (p != osd_sessions.end()) {
      OSDSession *s = p->second;
-@@ -1787,6 +1944,7 @@ int Objecter::_get_session(int osd, OSDSession **session, shunique_lock& sul)
+@@ -1787,6 +1946,7 @@ int Objecter::_get_session(int osd, OSDSession **session, shunique_lock& sul)
    OSDSession *s = new OSDSession(cct, osd);
    osd_sessions[osd] = s;
    s->con = messenger->connect_to_osd(osdmap->get_addrs(osd));
@@ -2713,7 +2722,7 @@ index bc39114..7cc4ed7 100644
    s->con->set_priv(RefCountedPtr{s});
    logger->inc(l_osdc_osd_session_open);
    logger->set(l_osdc_osd_sessions, osd_sessions.size());
-@@ -2181,6 +2339,12 @@ void Objecter::tick()
+@@ -2181,6 +2341,12 @@ void Objecter::tick()
      }
    }
  
@@ -2726,7 +2735,7 @@ index bc39114..7cc4ed7 100644
    // Make sure we don't reschedule if we wake up after shutdown
    if (initialized) {
      tick_event = timer.reschedule_me(ceph::make_timespan(
-@@ -2363,10 +2527,25 @@ void Objecter::_op_submit(Op *op, shunique_lock& sul, ceph_tid_t *ptid)
+@@ -2363,10 +2529,25 @@ void Objecter::_op_submit(Op *op, shunique_lock& sul, ceph_tid_t *ptid)
    // pick target
    ceph_assert(op->session == NULL);
    OSDSession *s = NULL;
@@ -2753,7 +2762,7 @@ index bc39114..7cc4ed7 100644
    // Try to get a session, including a retry if we need to take write lock
    int r = _get_session(op->target.osd, &s, sul);
    if (r == -EAGAIN ||
-@@ -2382,8 +2561,24 @@ void Objecter::_op_submit(Op *op, shunique_lock& sul, ceph_tid_t *ptid)
+@@ -2382,8 +2563,24 @@ void Objecter::_op_submit(Op *op, shunique_lock& sul, ceph_tid_t *ptid)
        // map changed; recalculate mapping
        ldout(cct, 10) << __func__ << " relock raced with osdmap, recalc target"
  		     << dendl;
@@ -2779,7 +2788,7 @@ index bc39114..7cc4ed7 100644
        if (s) {
  	put_session(s);
  	s = NULL;
-@@ -2453,6 +2648,17 @@ void Objecter::_op_submit(Op *op, shunique_lock& sul, ceph_tid_t *ptid)
+@@ -2453,6 +2650,17 @@ void Objecter::_op_submit(Op *op, shunique_lock& sul, ceph_tid_t *ptid)
    _session_op_assign(s, op);
  
    if (need_send) {
@@ -2797,7 +2806,7 @@ index bc39114..7cc4ed7 100644
      _send_op(op);
    }
  
-@@ -2770,6 +2976,231 @@ void Objecter::_prune_snapc(
+@@ -2770,6 +2978,231 @@ void Objecter::_prune_snapc(
    }
  }
  
@@ -3029,7 +3038,7 @@ index bc39114..7cc4ed7 100644
  int Objecter::_calc_target(op_target_t *t, Connection *con, bool any_change)
  {
    // rwlock is locked
-@@ -2969,6 +3400,7 @@ int Objecter::_calc_target(op_target_t *t, Connection *con, bool any_change)
+@@ -2969,6 +3402,7 @@ int Objecter::_calc_target(op_target_t *t, Connection *con, bool any_change)
    return RECALC_OP_TARGET_NO_ACTION;
  }
  
@@ -3037,7 +3046,7 @@ index bc39114..7cc4ed7 100644
  int Objecter::_map_session(op_target_t *target, OSDSession **s,
  			   shunique_lock& sul)
  {
-@@ -3139,7 +3571,6 @@ void Objecter::_finish_op(Op *op, int r)
+@@ -3139,7 +3573,6 @@ void Objecter::_finish_op(Op *op, int r)
    }
  
    logger->dec(l_osdc_op_active);
@@ -3045,7 +3054,7 @@ index bc39114..7cc4ed7 100644
    ceph_assert(check_latest_map_ops.find(op->tid) == check_latest_map_ops.end());
  
    inflight_ops--;
-@@ -3271,6 +3702,38 @@ void Objecter::_send_op(Op *op)
+@@ -3271,6 +3704,38 @@ void Objecter::_send_op(Op *op)
    if (op->trace.valid()) {
      m->trace.init("op msg", nullptr, &op->trace);
    }
@@ -3084,7 +3093,7 @@ index bc39114..7cc4ed7 100644
    op->session->con->send_message(m);
  }
  
-@@ -3326,6 +3789,130 @@ int Objecter::take_linger_budget(LingerOp *info)
+@@ -3326,6 +3791,130 @@ int Objecter::take_linger_budget(LingerOp *info)
    return 1;
  }
  
@@ -3215,7 +3224,7 @@ index bc39114..7cc4ed7 100644
  /* This function DOES put the passed message before returning */
  void Objecter::handle_osd_op_reply(MOSDOpReply *m)
  {
-@@ -3348,7 +3935,11 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
+@@ -3348,7 +3937,11 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
      m->put();
      return;
    }
@@ -3228,7 +3237,7 @@ index bc39114..7cc4ed7 100644
    OSDSession::unique_lock sl(s->lock);
  
    map<ceph_tid_t, Op *>::iterator iter = s->ops.find(tid);
-@@ -3406,7 +3997,6 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
+@@ -3406,7 +3999,6 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
    Context *onfinish = 0;
  
    int rc = m->get_result();
@@ -3236,7 +3245,7 @@ index bc39114..7cc4ed7 100644
    if (m->is_redirect_reply()) {
      ldout(cct, 5) << " got redirect reply; redirecting" << dendl;
      if (op->onfinish)
-@@ -3438,13 +4028,56 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
+@@ -3438,13 +4030,56 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
      op->target.flags &= ~(CEPH_OSD_FLAG_BALANCE_READS |
  			  CEPH_OSD_FLAG_LOCALIZE_READS);
      op->target.pgid = pg_t();
@@ -3293,7 +3302,7 @@ index bc39114..7cc4ed7 100644
    if (op->objver)
      *op->objver = m->get_user_version();
    if (op->reply_epoch)
-@@ -4399,6 +5032,53 @@ bool Objecter::ms_handle_reset(Connection *con)
+@@ -4399,6 +5034,53 @@ bool Objecter::ms_handle_reset(Connection *con)
      if (session) {
        ldout(cct, 1) << "ms_handle_reset " << con << " session " << session
  		    << " osd." << session->osd << dendl;
@@ -3304,9 +3313,9 @@ index bc39114..7cc4ed7 100644
 +    ceph_assert(plugin);
 +    OSDSession::unique_lock sl(session->lock);
 +    if (session->con) {
++        std::unique_lock<std::shared_mutex> wlock(plugin->msg_ref->connlock);
 +        plugin->msg_ref->connections.erase((void *)(session->con.get()));
-+        session->con->set_priv(NULL);
-+        session->con->mark_down();
++        wlock.unlock();
 +    }
 +    map<ceph_tid_t,Op*> resend;
 +    for (map<ceph_tid_t,Op*>::iterator p = session->ops.begin(); p != session->ops.end(); ++p) {
