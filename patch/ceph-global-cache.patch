@@ -63,10 +63,10 @@ index 0000000..aba70f7
 +
 diff --git a/src/client_adaptor/ClientAdaptorMgr.cc b/src/client_adaptor/ClientAdaptorMgr.cc
 new file mode 100644
-index 0000000..5f9f661
+index 0000000..530ba79
 --- /dev/null
 +++ b/src/client_adaptor/ClientAdaptorMgr.cc
-@@ -0,0 +1,223 @@
+@@ -0,0 +1,208 @@
 +/* License:LGPL-2.1
 +*
 +* Copyright (c) 2021 Huawei Technologies Co., Ltd All rights reserved.
@@ -164,7 +164,6 @@ index 0000000..5f9f661
 +int32_t ClientAdaptorCcm::init_mgr(Objecter *obj){
 +    using namespace std::chrono;
 +    int32_t ret = 0;
-+    seconds timeout {50 * 60};
 +    //Already init
 +    if (is_init_succeed()){
 +        if (!ccm_callback_register(obj)) {
@@ -172,27 +171,13 @@ index 0000000..5f9f661
 +        }
 +        return RET_OK;
 +    }
-+    steady_clock::time_point begin = steady_clock::now();
-+    while (true) {
-+        ret = OpenAgentInit(false);
-+        if (ret == 0) {
-+            break;
-+        }
 +
-+        steady_clock::time_point end = steady_clock::now();
-+        seconds time_span = duration_cast<seconds>(end - begin);
-+
-+        if (time_span > timeout) {
-+            std::cout << __func__ << " Client Adaptor: CCM agent init failed because of timeout"
-+                                  << ", timeout=" << timeout << std::endl;
-+            break;
-+        }
-+        sleep(1);
-+    }
-+    if (ret){
-+        std::cout << __func__ << " Client Adaptor: CCM agent init failed" << std::endl;
++    ret = OpenAgentInit(false);
++    if (ret != 0) {
++        std::cout << __func__ << " Client Adaptor: CCM agent init failed, ret=" << ret << std::endl;
 +	    return RET_CCM_AGENT_INIT_ERROR;
 +    }
++
 +    if (!ccm_callback_register(obj)){
 +    	return RET_CCM_REGISTER_ERROR;
 +    }
