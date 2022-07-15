@@ -2464,7 +2464,7 @@ index 4b03f5e..4b05d5c 100644
    session_stream_handlers = \
      ceph::crypto::onwire::rxtx_t::create_handler_pair(cct, *auth_meta, false);
 diff --git a/src/osdc/Objecter.cc b/src/osdc/Objecter.cc
-index bc39114..cc77780 100644
+index bc39114..eb8c5e5 100644
 --- a/src/osdc/Objecter.cc
 +++ b/src/osdc/Objecter.cc
 @@ -51,6 +51,18 @@
@@ -3081,7 +3081,7 @@ index bc39114..cc77780 100644
    op->session->con->send_message(m);
  }
  
-@@ -3326,6 +3794,133 @@ int Objecter::take_linger_budget(LingerOp *info)
+@@ -3326,6 +3794,140 @@ int Objecter::take_linger_budget(LingerOp *info)
    return 1;
  }
  
@@ -3090,6 +3090,9 @@ index bc39114..cc77780 100644
 +{
 +    ldout(cct, 3) << "Enter NodeView Change Retry OP Submit. available_nodes=" << available_nodes << dendl;
 +    map<ceph_tid_t, Op *> need_resend;
++    PluginRegistry *reg = cct->get_plugin_registry();
++    auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
++    ceph_assert(plugin);
 +    unique_lock sul(rwlock);
 +    for (map<int, OSDSession *>::iterator p = osd_sessions.begin(); p != osd_sessions.end();) {
 +        OSDSession *s = p->second;
@@ -3106,14 +3109,18 @@ index bc39114..cc77780 100644
 +            need_resend[it->second->tid] = it->second;
 +            it = s->ops.begin();
 +        }
++        if (s->con) {
++            std::unique_lock<std::shared_mutex> wlock(plugin->msg_ref->connlock);
++            auto connection = s->con.get()
++            plugin->msg_ref->connections.erase((void *)connection);
++            wlock.unlock();
++            ldout(cct, 3) << "NodeView Change need remove connection :" << connection << dendl;
++        }
 +        ++p;
 +        sl.unlock();
 +        close_session(s);
 +    }
 +
-+    PluginRegistry *reg = cct->get_plugin_registry();
-+    auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
-+    ceph_assert(plugin);
 +    OSDSession *s = homeless_session;
 +    OSDSession::unique_lock sl(s->lock);
 +    map<ceph_tid_t, Op *>::iterator p = s->ops.begin();
@@ -3215,7 +3222,7 @@ index bc39114..cc77780 100644
  /* This function DOES put the passed message before returning */
  void Objecter::handle_osd_op_reply(MOSDOpReply *m)
  {
-@@ -3348,7 +3943,11 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
+@@ -3348,7 +3950,11 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
      m->put();
      return;
    }
@@ -3228,7 +3235,7 @@ index bc39114..cc77780 100644
    OSDSession::unique_lock sl(s->lock);
  
    map<ceph_tid_t, Op *>::iterator iter = s->ops.find(tid);
-@@ -3406,7 +4005,6 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
+@@ -3406,7 +4012,6 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
    Context *onfinish = 0;
  
    int rc = m->get_result();
@@ -3236,7 +3243,7 @@ index bc39114..cc77780 100644
    if (m->is_redirect_reply()) {
      ldout(cct, 5) << " got redirect reply; redirecting" << dendl;
      if (op->onfinish)
-@@ -3438,13 +4036,56 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
+@@ -3438,13 +4043,56 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
      op->target.flags &= ~(CEPH_OSD_FLAG_BALANCE_READS |
  			  CEPH_OSD_FLAG_LOCALIZE_READS);
      op->target.pgid = pg_t();
@@ -3293,7 +3300,7 @@ index bc39114..cc77780 100644
    if (op->objver)
      *op->objver = m->get_user_version();
    if (op->reply_epoch)
-@@ -4399,6 +5040,53 @@ bool Objecter::ms_handle_reset(Connection *con)
+@@ -4399,6 +5047,53 @@ bool Objecter::ms_handle_reset(Connection *con)
      if (session) {
        ldout(cct, 1) << "ms_handle_reset " << con << " session " << session
  		    << " osd." << session->osd << dendl;
