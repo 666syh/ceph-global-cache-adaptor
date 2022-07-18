@@ -7,6 +7,7 @@ set(lib_lvos_include_idr ${GLOBAL_CACHE_DIR}/src/include/infras/infrastructure/l
 set(lib_ftds_include_dir ${GLOBAL_CACHE_DIR}/src/include/infras/ftds)
 set(lib_dplog_include_dir ${GLOBAL_CACHE_DIR}/src/include/infras/infrastructure/log)
 set(lib_dpax_redef_include_dir ${GLOBAL_CACHE_DIR}/src/include/infras)
+set(third_part_dir /opt/gcache_adaptor_compile/third_part)
 set(CMAKE_SKIP_RPATH true)
 set(ceph_proxy_srcs CephProxyInterface.cc
                     CephProxy.cc
@@ -49,6 +50,7 @@ find_library(FTDS_LIB
     libftdsclient.so
     PATHS
     ${GLOBAL_CACHE_DIR}/build/my_pkg_root/lib
+	${third_part_dir}/lib
 )
 
 find_library(DPLOG_LIB
@@ -56,6 +58,7 @@ find_library(DPLOG_LIB
     libdplog.so
     PATHS
     ${GLOBAL_CACHE_DIR}/build/my_pkg_root/lib
+	${third_part_dir}/lib
 )
 
 find_library(DPOSAX_LIB
@@ -63,6 +66,7 @@ find_library(DPOSAX_LIB
     libdposax.so
     PATHS
     ${GLOBAL_CACHE_DIR}/build/my_pkg_root/lib
+	${third_part_dir}/lib
 )
 
 add_library(proxy SHARED ${ceph_proxy_srcs})
