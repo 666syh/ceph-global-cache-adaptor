@@ -2464,7 +2464,7 @@ index 4b03f5e..4b05d5c 100644
    session_stream_handlers = \
      ceph::crypto::onwire::rxtx_t::create_handler_pair(cct, *auth_meta, false);
 diff --git a/src/osdc/Objecter.cc b/src/osdc/Objecter.cc
-index bc39114..eb8c5e5 100644
+index bc39114..e0b2351 100644
 --- a/src/osdc/Objecter.cc
 +++ b/src/osdc/Objecter.cc
 @@ -51,6 +51,18 @@
@@ -3111,7 +3111,7 @@ index bc39114..eb8c5e5 100644
 +        }
 +        if (s->con) {
 +            std::unique_lock<std::shared_mutex> wlock(plugin->msg_ref->connlock);
-+            auto connection = s->con.get()
++            auto connection = s->con.get();
 +            plugin->msg_ref->connections.erase((void *)connection);
 +            wlock.unlock();
 +            ldout(cct, 3) << "NodeView Change need remove connection :" << connection << dendl;
