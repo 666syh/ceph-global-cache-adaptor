@@ -1270,8 +1270,8 @@ bool ceph_status()
 	rados_conf_set(cluster, "rados_mon_op_timeout", "0.9");
 
 	ret = rados_connect(cluster);
-	if (ret < 0) {
-		syslog(LOG_ERR, "Failed to connect to the Rados.\n");
+	if (ret != 0) {
+		syslog(LOG_ERR, "Failed to connect to the Rados.ret = %d.\n", ret);
 		return false;
 	}
 
