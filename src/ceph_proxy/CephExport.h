@@ -56,6 +56,8 @@ int CephLibrbdGetImageName(const std::string& pool_name, int64_t pool_id,
 	const std::string& image_id, std::string& image_name,
 	const std::string& namespace_name);
 
+int CephLibrbdDiskUsage(uint64_t *usage);
+
 #ifdef __cplusplus
 }
 #endif

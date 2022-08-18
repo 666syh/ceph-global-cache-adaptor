@@ -10,6 +10,7 @@
 #include <shared_mutex>
 #include <atomic>
 #include <assert.h>
+#include <regex>
 #include "rbd/librbd.h"
 #include "rados/librados.h"
 #include "rados/librados.hpp"
@@ -20,6 +21,7 @@
 #define DEFAULT_CEPH_CONF_PATH "/etc/ceph/ceph.conf"
 #define RADOS_CONNECT_RETRY 5
 #define CONNECT_WAIT_TIME 5
+const uint32_t MB = (1024 * 1024);
 
 class NoProgressContext : public librbd::ProgressContext {
 public:
@@ -35,6 +37,15 @@ struct ProxyCtx {
 	librados::Rados client;
 	std::shared_mutex lock;
 	int ref;
+};
+struct SigPoolInfo {
+	int64_t poolId;
+	std::string poolName;
+	bool isEC;
+	int k;
+	int m;
+	uint64_t usage;
+	std::string ecProfileName;
 };
 
 static struct ProxyCtx gProxyCtx;
@@ -731,6 +742,322 @@ int CephLibrbdGetImageName(const std::string& pool_name, int64_t pool_id,
 close_ioctx:
 	IoCtxDestroy(ioctx);
 
+shutdown:
+	RadosShutdown();
+	return ret;
+}
+
+static int MonCommand(std::string cmd, std::string &_outs)
+{
+	int ret;
+	assert(gProxyCtx.init_flag);
+	std::string outs;
+	bufferlist inbl;
+	bufferlist outbl;
+	ret = gProxyCtx.client.mon_command(cmd, inbl, &outbl, &outs);
+	if (ret < 0) {
+		ProxyDbgLogWarn("mon_command failed: %s, ret=%d", cmd.c_str(), ret);
+		return ret;
+	}
+	_outs = outbl.to_str().c_str();
+	return 0;
+}
+
+static int ParsePoolMap(std::string &outs, std::map<int64_t, struct SigPoolInfo> &poolMap)
+{
+	std::string pattern = "\\s*(\\d+)\\s+(\\S+)";
+	std::vector<std::string> preVec;
+	char *strs = new char[outs.length() + 1];
+	if (strs == nullptr) {
+		ProxyDbgLogErr("alloc memory failed");
+		return -1;
+	}
+	strcpy(strs, outs.c_str());
+	char *p = strtok(strs, "\n");
+	while (p) {
+		std::string s = p;
+		preVec.push_back(s);
+		p = strtok(NULL, "\n");
+	}
+
+	for (size_t i = 0; i < preVec.size(); i++) {
+		std::regex expression(pattern);
+		std::smatch result;
+		bool flag = std::regex_match(preVec[i], result, expression);
+		if (flag) {
+			int64_t poolId = atoi(result[1].str().c_str());
+			struct SigPoolInfo info;
+			info.poolId = poolId;
+			info.poolName = result[2].str().c_str();
+			info.usage = 0;
+			poolMap[poolId] = info;
+			ProxyDbgLogInfo("pool %s, id %ld", info.poolName.c_str(), info.poolId);
+		}
+	}
+
+	if (strs) {
+		delete[] strs;
+		strs = nullptr;
+	}
+	return 0;
+}
+
+static int GetECPoolScale(struct SigPoolInfo &info)
+{
+	std::string cmd("{\"prefix\": \"osd erasure-code-profile get\", \"name\": \"");
+	std::string outs;
+	cmd.append(info.ecProfileName);
+	cmd.append(std::string("\"}"));
+
+	int ret = MonCommand(cmd, outs);
+	if (ret != 0) {
+		ProxyDbgLogErr("Get erasure code profile failed, profile=%s, ret=%d", info.ecProfileName.c_str(), ret);
+		return ret;
+	}
+
+	std::vector<std::string> preVec;
+	char *strs = new char[outs.length() + 1];
+	if (strs == nullptr) {
+		ProxyDbgLogErr("alloc memory failed");
+		return -1;
+	}
+	strcpy(strs, outs.c_str());
+	char *p = strtok(strs, "\n");
+	while (p) {
+		std::string s = p;
+		preVec.push_back(s);
+		p = strtok(NULL, "\n");
+	}
+
+	for (uint32_t i = 0; i < preVec.size(); i++) {
+		std::regex expression("(\\w+)=(\\w+)");
+		std::smatch result;
+		bool flag = std::regex_match(preVec[i], result, expression);
+		if (!flag) {
+			continue;
+		}
+		if (result[1].str().compare("k") == 0) {
+			info.k = atoi(result[2].str().c_str());
+		} else if (result[1].str().compare("m") == 0) {
+			info.m = atoi(result[2].str().c_str());
+		}
+	}
+
+	if (strs) {
+		delete[] strs;
+		strs = nullptr;
+	}
+	return 0;
+}
+
+static int CalPoolProperty(std::map<int64_t, struct SigPoolInfo> &poolMap)
+{
+	for (std::map<int64_t, struct SigPoolInfo>::iterator p = poolMap.begin(); p != poolMap.end(); p++) {
+		struct SigPoolInfo& info = p->second;
+		std::string cmd("{\"var\": \"erasure_code_profile\", \"prefix\": \"osd pool get\", \"pool\": \"");
+		std::string outs;
+		cmd.append(info.poolName);
+		cmd.append(std::string("\"}"));
+		int ret = MonCommand(cmd, outs);
+		if (ret < 0) {
+			if (ret == -EACCES) {
+				info.isEC = false;
+				info.k = 1;
+				info.m = 2;
+				ProxyDbgLogInfo("Non EC pool %s, k=%d, m=%d", info.poolName.c_str(), info.k, info.m);
+			} else {
+				ProxyDbgLogErr("Get erasure code profile failed, name=%s, ret=%d", info.poolName.c_str(), ret);
+				return ret;
+			}
+		} else {
+			info.isEC = true;
+			info.k = info.m = 0;
+			std::regex expression("erasure_code_profile:\\s(\\S+)\\n?");
+			std::smatch result;
+			std::string outStr(outs.c_str());
+			bool flag = std::regex_match(outStr, result, expression);
+			if (flag) {
+				info.ecProfileName = result[1].str().c_str();
+			} else {
+				ProxyDbgLogErr("regex erasure code profile failed, name=%s, out=%s",
+					info.poolName.c_str(), outs.c_str());
+				return -1;
+			}
+			ret = GetECPoolScale(info);
+			if (ret < 0) {
+				ProxyDbgLogErr("get EC pool size failed! ret=%d", ret);
+				return ret;
+			}
+			assert(info.k != 0 && info.m != 0);
+			ProxyDbgLogInfo("EC pool %s, k=%d, m=%d", info.poolName.c_str(), info.k, info.m);
+		}
+	}
+	return 0;
+}
+
+static int DiffCallback(uint64_t offset, size_t len, int exists, void *arg)
+{
+	uint64_t *used = reinterpret_cast<uint64_t *>(arg);
+	if (exists) {
+		(*used) += len;
+	}
+	return 0;
+}
+
+static int CalImageUsage(librados::IoCtx &ioctx, struct SigPoolInfo& info, librbd::image_spec_t& imageSpec)
+{
+	int ret;
+	librbd::RBD rbd;
+	librbd::Image image;
+	bool exact = false;
+	ret = rbd.open_read_only(ioctx, image, imageSpec.name.c_str(), NULL);
+	if (ret < 0) {
+		ProxyDbgLogErr("image open failed, image=%s/%s, ret=%d", 
+			info.poolName.c_str(), imageSpec.name.c_str(), ret);
+		return ret;
+	}
+
+	librbd::image_info_t state;
+	std::string lastSnap;
+	std::vector<librbd::snap_info_t> snapList;
+	uint64_t used;
+	const char *snapFrom = nullptr;
+
+	ret = image.stat(state, sizeof(state));
+	if (ret < 0) {
+		ProxyDbgLogErr("image stat failed, image=%s/%s, ret=%d", 
+			info.poolName.c_str(), imageSpec.name.c_str(), ret);
+		goto image_close;
+	}
+
+	ret = image.snap_list(snapList);
+	if (ret < 0) {
+		ProxyDbgLogErr("image snap list failed, image=%s/%s, ret=%d", 
+			info.poolName.c_str(), imageSpec.name.c_str(), ret);
+		goto image_close;
+	}
+
+	for (librbd::snap_info_t& snap : snapList) {
+		librbd::Image snap_image;
+		ret = rbd.open_read_only(ioctx, snap_image, imageSpec.name.c_str(), snap.name.c_str());
+		if (ret < 0) {
+			ProxyDbgLogErr("snap open failed, image=%s/%s@%s, ret=%d", 
+				info.poolName.c_str(), imageSpec.name.c_str(), snap.name.c_str(), ret);
+			goto image_close;
+		}
+
+		if (!lastSnap.empty()) {
+			snapFrom = lastSnap.c_str();
+		}
+		used = 0;
+		ret = snap_image.diff_iterate2(snapFrom, 0, snap.size, false, !exact, &DiffCallback, &used);
+		if (ret < 0) {
+			ProxyDbgLogErr("snap diff failed, image=%s/%s@%s, ret=%d", 
+				info.poolName.c_str(), imageSpec.name.c_str(), snap.name.c_str(), ret);
+			snap_image.close();
+			goto image_close;
+		}
+		info.usage += used;
+		lastSnap = snap.name.c_str();
+		ProxyDbgLogInfo("snap %s/%s@%s, used=%lu",
+			info.poolName.c_str(), imageSpec.name.c_str(), snap.name.c_str(), used);
+	}
+
+	if (!lastSnap.empty()) {
+		snapFrom = lastSnap.c_str();
+	}
+	used = 0;
+	ret = image.diff_iterate2(snapFrom, 0, state.size, false, !exact, &DiffCallback, &used);
+	if (ret < 0) {
+		ProxyDbgLogErr("image diff failed, image=%s/%s, ret=%d", 
+			info.poolName.c_str(), imageSpec.name.c_str(), ret);
+		goto image_close;
+	}
+	info.usage += used;
+	ProxyDbgLogInfo("image %s/%s, used=%lu", info.poolName.c_str(), imageSpec.name.c_str(), used);
+image_close:
+	image.close();
+	return ret;
+}
+
+static int CalPoolUsage(std::map<int64_t, struct SigPoolInfo> &poolMap)
+{
+	int ret = 0;
+	for (std::map<int64_t, struct SigPoolInfo>::iterator p = poolMap.begin(); p!= poolMap.end(); p++) {
+		struct SigPoolInfo& info = p->second;
+		librados::IoCtx ioctx;
+		ret = IoctxInit(&ioctx, info.poolName, 0, "");
+		if (ret < 0) {
+			ProxyDbgLogErr("ioctx Init failed, poolName=%s, ret=%d", info.poolName.c_str(), ret);
+			return ret;
+		}
+		librbd::RBD rbd;
+		std::vector<librbd::image_spec_t> images;
+		ret = rbd.list2(ioctx, &images);
+		if (ret < 0) {
+			ProxyDbgLogErr("ioctx list image failed, poolName=%s, ret=%d", info.poolName.c_str(), ret);
+			IoCtxDestroy(ioctx);
+			return ret;
+		}
+		for (librbd::image_spec_t& imageSpec: images) {
+			ret = CalImageUsage(ioctx, info, imageSpec);
+			if (ret < 0) {
+				ProxyDbgLogErr("cal image usage failed, image=%s/%s, ret=%d",
+					info.poolName.c_str(), imageSpec.name.c_str(), ret);
+				IoCtxDestroy(ioctx);
+				return ret;
+			}
+		}
+		IoCtxDestroy(ioctx);
+	}
+	return ret;
+}
+
+int CephLibrbdDiskUsage(uint64_t *usage)
+{
+	if (usage == nullptr) {
+		return -1;
+	}
+
+	std::map<std::string, std::string> confMap;
+    confMap["rbd_cache_writethrough_until_flush"] = "false";
+	std::map<int64_t, struct SigPoolInfo> poolMap;
+	std::map<int64_t, struct SigPoolInfo>::iterator p;
+
+    int ret = RadosInit(std::string(DEFAULT_CEPH_CONF_PATH), confMap);
+    if (ret < 0) {
+	    ProxyDbgLogErr("rados client Init failed: %d", ret);
+	    return ret;
+    }
+	std::string cmd("{\"prefix\":\"osd lspools\"}");
+	std::string outs;
+	ret = MonCommand(cmd, outs);
+	if (ret < 0) {
+		ProxyDbgLogErr("lspools failed: %d", ret);
+	    goto shutdown;
+	}
+
+	ret = ParsePoolMap(outs, poolMap);
+	if (ret < 0) {
+		goto shutdown;
+	}
+
+	ret = CalPoolProperty(poolMap);
+	if (ret < 0) {
+		goto shutdown;
+	}
+
+	ret = CalPoolUsage(poolMap);
+	if (ret < 0) {
+		goto shutdown;
+	}
+
+	*usage = 0;
+	for (p = poolMap.begin(); p != poolMap.end(); p++) {
+		struct SigPoolInfo& info = p->second;
+		*usage += info.usage * (info.k + info.m) / info.k;
+	}
+	*usage /= MB;
 shutdown:
 	RadosShutdown();
 	return ret;
