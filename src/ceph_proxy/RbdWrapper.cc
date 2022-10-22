@@ -18,9 +18,10 @@
 #include "CephExport.h"
 #include "CephProxyLog.h"
 
-#define DEFAULT_CEPH_CONF_PATH "/etc/ceph/ceph.conf"
+#define AUTH_CLUSTER_REQUIRED "auth_cluster_required"
 #define RADOS_CONNECT_RETRY 5
 #define CONNECT_WAIT_TIME 5
+#define PATH_MAX_LEN		128
 const uint32_t MB = (1024 * 1024);
 
 class NoProgressContext : public librbd::ProgressContext {
@@ -70,37 +71,6 @@ static void GetImage(librbd::Image &rbd_image, std::string &image_name, std::str
 	image_id.assign(imageId);
 }
 
-static int ImageGetSnaps(librbd::Image& rbd_image,
-	std::map<uint64_t, std::string>& snap_map_by_id,
-	std::map<std::string, uint64_t>& snap_map_by_name,
-	bool all = false)
-{
-	std::vector<librbd::snap_info_t> snaps;
-	int ret;
-
-	ret = rbd_image.snap_list(snaps);
-	if (ret < 0) {
-		ProxyDbgLogErr("rbd: unable to list snapshots, ret=%d", ret);
-		return ret;
-	}
-
-	for (std::vector<librbd::snap_info_t>::iterator s = snaps.begin(); s != snaps.end(); s++) {
-		if (!all) {
-			librbd::snap_namespace_type_t namespace_type;
-			int r = rbd_image.snap_get_namespace_type(s->id, &namespace_type);
-			if (r < 0) {
-				ProxyDbgLogErr("rbd: unable to get snap namespace type, snap=%lu:%s", s->id, s->name.c_str());
-			} else if(namespace_type != RBD_SNAP_NAMESPACE_TYPE_USER){
-				continue;
-			}
-		}
-		snap_map_by_id[s->id] = s->name;
-		snap_map_by_name[s->name] = s->id;
-	}
-
-	return ret;
-}
-
 static void RadosShutdown()
 {
 	unique_lock l(gProxyCtx.lock);
@@ -127,8 +97,32 @@ static void FastInitRados(std::map<std::string, std::string>& conf_map)
 	}
 }
 
-static int RadosInit(const std::string& conf_path,
-	std::map<std::string, std::string>& conf_map)
+extern "C" {
+	int GetCfgItemCstr(char *dest, size_t destSize, const char *unit, const char *key);
+}
+
+static int GetCephPath(std::string &confPath, std::string &keyPath)
+{
+	char cephConfPath[PATH_MAX_LEN] = { '\0' };
+	char cephKeyringPath[PATH_MAX_LEN] = { '\0' };
+	int ret = GetCfgItemCstr(cephConfPath, PATH_MAX_LEN, "proxy", "ceph_conf_path");
+	if (ret != 0) {
+		ProxyDbgLogErr("Failed to read the proxy conf ceph_conf_path. ret=%d\n", ret);
+		return ret;
+	}
+
+	ret = GetCfgItemCstr(cephKeyringPath, PATH_MAX_LEN, "proxy", "ceph_keyring_path");
+	if (ret != 0) {
+		ProxyDbgLogErr("Failed to read the proxy conf ceph_keyring_path. ret=%d\n", ret);
+		return ret;
+	}
+
+	confPath = cephConfPath;
+	keyPath = cephKeyringPath;
+	return 0;
+}
+
+static int RadosInit(std::map<std::string, std::string>& conf_map)
 {
 	uint32_t retryCount = 0;
 	{
@@ -151,14 +145,36 @@ static int RadosInit(const std::string& conf_path,
 		return ret;
 	}
 
-	ret = gProxyCtx.client.conf_read_file(conf_path.c_str());
-	if (ret < 0) {
-		ProxyDbgLogErr("rados read file failed: %d", ret);
-		gProxyCtx.client.shutdown();
-		return ret;
+	std::string confPath, keyPath;
+	std::string anthName;
+	std::map<std::string, std::string>::iterator iter;
+
+	ret = GetCephPath(confPath, keyPath);
+	if (ret != 0) {
+		ProxyDbgLogErr("rados ceph path failed: %d", ret);
+		goto shutdown;
 	}
 
-	std::map<std::string, std::string>::iterator iter;
+	ret = gProxyCtx.client.conf_read_file(confPath.c_str());
+	if (ret != 0) {
+		ProxyDbgLogErr("rados read file failed: %d", ret);
+		goto shutdown;
+	}
+
+	ret = gProxyCtx.client.conf_get(AUTH_CLUSTER_REQUIRED, anthName);
+	if (ret != 0) {
+		ProxyDbgLogErr("rados conf get keyring failed, ret=%d", ret);
+		goto shutdown;
+	}
+
+	if (strcmp(anthName.c_str(), "cephx") == 0) {
+		ret = gProxyCtx.client.conf_set("keyring", keyPath.c_str());
+		if (ret < 0) {
+			ProxyDbgLogErr("rados conf set keyring=%s failed, ret=%d", keyPath.c_str(), ret);
+			goto shutdown;
+		}
+	}
+	
 	for (iter = conf_map.begin(); iter != conf_map.end(); iter++) {
 		ret = gProxyCtx.client.conf_set(iter->first.c_str(), iter->second.c_str());
 		if (ret < 0) {
@@ -193,6 +209,9 @@ static int RadosInit(const std::string& conf_path,
 
 	ProxyDbgLogDebug("rados init success");
 	return 0;
+shutdown:
+	gProxyCtx.client.shutdown();
+	return ret;
 }
 
 static void IoCtxDestroy(librados::IoCtx& ioctx)
@@ -281,6 +300,17 @@ static int IoctxOpenImage(librados::IoCtx &io_ctx, const std::string& image_name
 	return ret;
 }
 
+static int ImageState(librbd::Image &image, rbd_image_info_t &info)
+{
+	int ret;
+	librbd::RBD rbd;
+	ret = image.stat(info, 1);
+	if (ret < 0) {
+		ProxyDbgLogErr("rbd stat failed, ret=%d", ret);
+	}
+	return ret;
+}
+
 static int ImageRemoveSnap(librbd::Image& image, const std::string& snap_name, uint64_t snap_id, bool force)
 {
 	int ret;
@@ -305,23 +335,16 @@ static int ImageRemoveSnap(librbd::Image& image, const std::string& snap_name, u
 	return ret;
 }
 
-static int ImageCreateSnap(librbd::Image& image, const std::string& snap_name)
-{
-	int ret;
-
-	ret = image.snap_create(snap_name.c_str());
-	if (ret < 0) {
-		ProxyDbgLogErr("rbd snap create failed. snap_name %s ret %d", snap_name.c_str(), ret);
-	}
-	return ret;
-}
-
 int CephLibrbdSnapRemove(int64_t pool_id,
 	const char* _namespace_name,
 	const char* _image_id,
 	uint64_t snap_id,
 	bool force)
 {
+	if (_namespace_name == nullptr || _image_id == nullptr) {
+		ProxyDbgLogErr("namespace_name %p or image_id %p should not nullptr", _namespace_name, _image_id);
+		return -EINVAL;
+	}
 	int ret;
 	librados::IoCtx ioctx;
 	librbd::Image image;
@@ -345,7 +368,7 @@ int CephLibrbdSnapRemove(int64_t pool_id,
 		return -EINVAL;
 	}
 
-	ret = RadosInit(std::string(DEFAULT_CEPH_CONF_PATH), confMap);
+	ret = RadosInit(confMap);
 	if (ret < 0) {
 		ProxyDbgLogErr("rados client Init failed: %d", ret);
 		return ret;
@@ -397,243 +420,6 @@ shutdown:
 	return ret;
 }
 
-int CephLibrbdSnapCreate(const char* _pool_name,
-	int64_t pool_id,
-	const char* _namespace_name,
-	const char* _image_name,
-	const char* _image_id,
-	const char* _snap_name,
-	uint64_t* snap_id)
-{
-	int ret;
-	librados::IoCtx ioctx;
-	librbd::Image image;
-	std::string pool_name = _pool_name;
-	std::string namespace_name = _namespace_name;
-	std::string image_name = _image_name;
-	std::string image_id = _image_id;
-	std::string snap_name = _snap_name;
-	std::map<uint64_t, std::string> snap_map_by_id;
-	std::map<std::string, uint64_t> snap_map_by_name;
-
-	if (pool_id == 0 && pool_name.empty()) {
-		ProxyDbgLogErr("both empty with pool id and pool name");
-		return -EINVAL;
-	} else if (image_id.empty() && image_name.empty()) {
-		ProxyDbgLogErr("both empty with image id and image name");
-		return -EINVAL;
-	} else if (snap_name.empty()) {
-		ProxyDbgLogErr("empty with snap name");
-		return -EINVAL;
-	}
-
-	std::map<std::string, std::string> confMap;
-	confMap["rbd_cache_writethrough_until_flush"] = "false";
-
-	ret = RadosInit(std::string(DEFAULT_CEPH_CONF_PATH), confMap);
-	if (ret < 0) {
-		ProxyDbgLogErr("rados client Init failed: %d", ret);
-		return ret;
-	}
-
-	ret = IoctxInit(&ioctx, pool_name, pool_id, namespace_name);
-	if (ret < 0) {
-		ProxyDbgLogErr("ioctx Init failed: %d", ret);
-		goto shutdown;
-	}
-
-	ret = IoctxOpenImage(ioctx, image_name, image_id, &image);
-	if (ret < 0) {
-		ProxyDbgLogErr("image open failed: %d", ret);
-		goto close_ioctx;
-	}
-
-	ret = ImageCreateSnap(image, snap_name);
-	if (ret < 0 && ret != -EEXIST) {
-		ProxyDbgLogErr("image create snap failed: %d", ret);
-		goto close_image;
-	}
-
-	ProxyDbgLogDebug("image create snap success pool %ld:%s image %s:%s snap %s",
-		pool_id, pool_name, image_id, image_name, snap_name);
-
-	ret = ImageGetSnaps(image, snap_map_by_id, snap_map_by_name);
-	if (ret < 0) {
-		ProxyDbgLogErr("image get snap failed: %d, should AGAIN", ret);
-		ret = -EAGAIN;
-		goto close_image;
-	}
-
-	assert(snap_map_by_name.count(snap_name) != 0);
-	*snap_id = snap_map_by_name[snap_name];
-
-close_image:
-	IoctxCloseImage(image);
-
-close_ioctx:
-	IoCtxDestroy(ioctx);
-
-shutdown:
-	RadosShutdown();
-	return ret;
-}
-
-int CephLibrbdSnapList(const char* _pool_name,
-	int64_t pool_id,
-	const char *_namespace_name,
-	const char *_image_name,
-	const char *_image_id,
-	uint64_t **snap_map_id,
-	char ***snap_map_name,
-	int *snap_map_length)
-{
-	int ret;
-	int i = 0;
-	librados::IoCtx ioctx;
-	librbd::Image image;
-	std::string pool_name = _pool_name;
-	std::string namespace_name = _namespace_name;
-	std::string image_name = _image_name;
-    std::string image_id = _image_id;
-    std::map<uint64_t, std::string> snap_map_by_id;
-    std::map<std::string, uint64_t> snap_map_by_name;
-
-    if (pool_id == 0 && pool_name.empty()) {
-	    ProxyDbgLogErr("both empty with pool id and pool name");
-	    return -EINVAL;
-    } else if (image_id.empty() && image_name.empty()) {
-	    ProxyDbgLogErr("both empty with image id and image name");
-	    return -EINVAL;
-    } else if (*snap_map_id != NULL || *snap_map_name != NULL) {
-	    ProxyDbgLogErr("snap_map_id or snap_map_name pointer params need NULL");
-	    return -EINVAL;
-}
-
-    std::map<std::string, std::string> confMap;
-    confMap["rbd_cache_writethrough_until_flush"] = "false";
-
-    ret = RadosInit(std::string(DEFAULT_CEPH_CONF_PATH), confMap);
-    if (ret < 0) {
-	    ProxyDbgLogErr("rados client Init failed: %d", ret);
-	    return ret;
-    }
-
-    ret = IoctxInit(&ioctx, pool_name, 0, namespace_name);
-    if (ret < 0) {
-	    ProxyDbgLogErr("ioctx Init failed: %d", ret);
-	    goto shutdown;
-    }
-
-    ret = IoctxOpenImage(ioctx, image_name, image_id, &image);
-    if (ret < 0) {
-	    ProxyDbgLogErr("image open failed: %d", ret);
-	    goto close_ioctx;
-    }
-
-    ret = ImageGetSnaps(image, snap_map_by_id, snap_map_by_name);
-    if (ret < 0) {
-	    ProxyDbgLogErr("image get snaps failed: %d", ret);
-	    goto close_image;
-    }
-
-    *snap_map_length = snap_map_by_id.size();
-    if (*snap_map_length == 0) {
-	    goto close_image;
-    }
-    // init
-    *snap_map_id = (uint64_t*)calloc(*snap_map_length, sizeof(uint64_t));
-    if (*snap_map_id == NULL) {
-	    ret = -ENOMEM;
-	    goto close_image;
-    }
-    *snap_map_name = (char **)calloc(*snap_map_length, sizeof(char*));
-    if (*snap_map_name == NULL) {
-	    ret = -ENOMEM;
-	    free(*snap_map_id);
-	    *snap_map_id = NULL;
-	    goto close_image;
-    }
-
-    for (std::map<uint64_t, std::string>::iterator s = snap_map_by_id.begin(); s != snap_map_by_id.end(); s++) {
-	    (*snap_map_id)[i] = s->first;
-	    (*snap_map_name)[i] = (char*)calloc(1, s->second.length());
-	    if ((*snap_map_name)[i] == NULL) {
-		    ret = -ENOMEM;
-		    break;
-	    }
-	    memcpy((*snap_map_name)[i], s->second.c_str(), s->second.length());
-	    i++;
-	    ProxyDbgLogDebug("image list snap (%d) pool %ld:%s image %s:%s snap %lu:%s", i,
-		    pool_id, pool_name, image_id, image_name, s->first, s->second);
-    }
-    if (i < *snap_map_length) {
-	    for (int j = 0; j < i; j++) {
-		    free((*snap_map_name)[j]);
-	    }
-	    free(*snap_map_name);
-	    free(*snap_map_id);
-	    *snap_map_name = NULL;
-	    *snap_map_id = NULL;
-    }
-
-close_image:
-IoctxCloseImage(image);
-
-close_ioctx:
-IoCtxDestroy(ioctx);
-
-shutdown:
-RadosShutdown();
-return ret;
-}
-
-void CephLibrbdSnapListEnd(uint64_t** snap_map_id,
-	char*** snap_map_name,
-	int snap_map_length)
-{
-	for (int i = 0; i < snap_map_length; i++) {
-		free((*snap_map_name)[i]);
-	}
-	if (*snap_map_name) {
-	    free(*snap_map_name);
-		*snap_map_name = NULL;
-	}
-	if (*snap_map_id) {
-	    free(*snap_map_id);
-		*snap_map_id = NULL;
-	}
-}
-
-int CephLibrbdGetPoolId(const std::string& pool_name, int64_t& pool_id,
-	const std::string& namespace_name)
-{
-	int ret;
-	librados::IoCtx ioctx;
-    std::string pname;
-	
-	std::map<std::string, std::string> confMap;
-	ret = RadosInit(std::string(DEFAULT_CEPH_CONF_PATH), confMap);
-	if (ret < 0) {
-		ProxyDbgLogErr("rados client Init failed: %d", ret);
-		return ret;
-	}
-
-	ret = IoctxInit(&ioctx, pool_name, 0, namespace_name);
-    if (ret < 0) {
-		ProxyDbgLogErr("ioctx Init failed: %d", ret);
-		goto shutdown;
-	}
-
-	GetPool(ioctx, pool_id, pname);
-	assert(pname == pool_name);
-
-	IoCtxDestroy(ioctx);
-
-shutdown:
-	RadosShutdown();
-	return ret;
-}
-
 int CephLibrbdGetPoolName(std::string& pool_name, int64_t pool_id,
 	const std::string& namespace_name)
 {
@@ -643,7 +429,7 @@ int CephLibrbdGetPoolName(std::string& pool_name, int64_t pool_id,
 
 	std::map<std::string, std::string> confMap;
 
-	ret = RadosInit(std::string(DEFAULT_CEPH_CONF_PATH), confMap);
+	ret = RadosInit(confMap);
 	if (ret < 0) {
 		ProxyDbgLogErr("rados client Init failed: %d", ret);
 		return ret;
@@ -665,47 +451,6 @@ shutdown:
 	return ret;
 }
 
-int CephLibrbdGetImageId(const std::string& pool_name, int64_t pool_id,
-	std::string &image_id, const std::string &image_name,
-	const std::string& namespace_name)
-{
-	int ret;
-	librados::IoCtx ioctx;
-	librbd::Image image;
-	std::string iname;
-
-	std::map<std::string, std::string> confMap;
-	ret = RadosInit(std::string(DEFAULT_CEPH_CONF_PATH), confMap);
-	if (ret < 0) {
-		ProxyDbgLogErr("rados client Init failed: %d", ret);
-		return ret;
-	}
-
-	ret = IoctxInit(&ioctx, pool_name, pool_id, namespace_name);
-	if (ret < 0) {
-		ProxyDbgLogErr("ioctx Init failed: %d", ret);
-		goto shutdown;
-	}
-
-	ret = IoctxOpenImage(ioctx, image_name, "", &image);
-	if (ret < 0) {
-		ProxyDbgLogErr("image open failed: %d", ret);
-		goto close_ioctx;
-	}
-
-	GetImage(image, iname, image_id);
-	assert(iname == image_name);
-
-	IoctxCloseImage(image);
-
-close_ioctx:
-	IoCtxDestroy(ioctx);
-
-shutdown:
-	RadosShutdown();
-	return ret;
-}
-
 int CephLibrbdGetImageName(const std::string& pool_name, int64_t pool_id,
 	const std::string& image_id, std::string& image_name,
 	const std::string& namespace_name)
@@ -716,7 +461,7 @@ int CephLibrbdGetImageName(const std::string& pool_name, int64_t pool_id,
 	std::string iid;
 
 	std::map<std::string, std::string> confMap;
-	ret = RadosInit(std::string(DEFAULT_CEPH_CONF_PATH), confMap);
+	ret = RadosInit(confMap);
 	if (ret < 0) {
 		ProxyDbgLogErr("rados client Init failed: %d", ret);
 		return ret;
@@ -737,6 +482,58 @@ int CephLibrbdGetImageName(const std::string& pool_name, int64_t pool_id,
 	GetImage(image, image_name, iid);
 	assert(iid == image_id);
 
+	IoctxCloseImage(image);
+
+close_ioctx:
+	IoCtxDestroy(ioctx);
+
+shutdown:
+	RadosShutdown();
+	return ret;
+}
+
+int CephLibrbdGetImageInfo(int64_t pool_id,
+							const char *_image_id,
+							int32_t *num_objs)
+{
+	if (num_objs == nullptr || _image_id == nullptr) {
+		ProxyDbgLogErr("num_objs %p or image_id %p should not nullptr", num_objs, _image_id);
+		return -EINVAL;
+	}
+	int ret;
+	librados::IoCtx ioctx;
+	librbd::Image image;
+	std::string image_id = _image_id;
+	rbd_image_info_t info;
+
+	std::map<std::string, std::string> confMap;
+	ret = RadosInit(confMap);
+	if (ret < 0) {
+		ProxyDbgLogErr("rados client Init failed: %d", ret);
+		return ret;
+	}
+
+	ret = IoctxInit(&ioctx, "", pool_id, "");
+	if (ret < 0) {
+		ProxyDbgLogErr("ioctx %ld Init failed: %d", pool_id, ret);
+		goto shutdown;
+	}
+
+	ret = IoctxOpenImage(ioctx, "", image_id, &image);
+	if (ret < 0) {
+		ProxyDbgLogErr("image %s open failed: %d", _image_id, ret);
+		goto close_ioctx;
+	}
+
+	ret = ImageState(image, info);
+	if (ret < 0) {
+		ProxyDbgLogErr("get image order failed! image=%s, ret=%d", _image_id,  ret);
+		goto close_image;
+	}
+
+	*num_objs = info.num_objs;
+
+close_image:
 	IoctxCloseImage(image);
 
 close_ioctx:
@@ -1016,7 +813,8 @@ static int CalPoolUsage(std::map<int64_t, struct SigPoolInfo> &poolMap)
 int CephLibrbdDiskUsage(uint64_t *usage)
 {
 	if (usage == nullptr) {
-		return -1;
+		ProxyDbgLogErr("usage %p should not nullptr", usage);
+		return -EINVAL;
 	}
 
 	std::map<std::string, std::string> confMap;
@@ -1024,7 +822,7 @@ int CephLibrbdDiskUsage(uint64_t *usage)
 	std::map<int64_t, struct SigPoolInfo> poolMap;
 	std::map<int64_t, struct SigPoolInfo>::iterator p;
 
-    int ret = RadosInit(std::string(DEFAULT_CEPH_CONF_PATH), confMap);
+    int ret = RadosInit(confMap);
     if (ret < 0) {
 	    ProxyDbgLogErr("rados client Init failed: %d", ret);
 	    return ret;

@@ -21,6 +21,9 @@ std::string objectsPattern  = "([0-9]+\\.?[0-9]*)(k|M)*\\s*";
 std::string usedPattern     = "([0-9]*\\.?[0-9]*)\\s(TiB|GiB|MiB|KiB|B)*\\s*";
 std::string usedRatioPattern = "([0-9]*\\.?[0-9]*)\\s*";
 std::string availPattern    = "([0-9]*\\.?[0-9]*)\\s(TiB|GiB|MiB|KiB|B).*";
+uint32_t defaultStripeUnit = 4096;
+int defaultECKInReplica = 1;
+int defaultECMInReplica = 2;
 
 uint64_t TransStrUnitToNum(const char *strUnit)
 {
@@ -28,17 +31,31 @@ uint64_t TransStrUnitToNum(const char *strUnit)
         return PIB_NUM;
     } else if (strcmp("TiB", strUnit) == 0) {
         return TIB_NUM;
-    } else if (strcmp("GiB", strUnit) == 0) {
+    } else if (strcmp("GiB", strUnit) == 0 || strcmp("G", strUnit) == 0) {
         return GIB_NUM;
-    } else if (strcmp("MiB", strUnit) == 0) {
+    } else if (strcmp("MiB", strUnit) == 0 || strcmp("M", strUnit) == 0) {
         return MIB_NUM;
-    } else if (strcmp("KiB", strUnit) == 0) {
+    } else if (strcmp("KiB", strUnit) == 0 || strcmp("K", strUnit) == 0) {
         return KIB_NUM;
     } else if (strcmp("B", strUnit) == 0) {
         return 1;
     }
 
     return 1;
+}
+
+void TransStrToNum(std::string strNum, uint64_t &num)
+{
+    std::regex pattern("(\\d+)\\s?(\\w+)?");
+    std::smatch result;
+    bool flag = std::regex_match(strNum, result, pattern);
+    if (flag) {
+        uint32_t size = atoi(result[1].str().c_str());
+        uint64_t unit = TransStrUnitToNum(result[2].str().c_str());
+        num = size * unit;
+    } else {
+        ProxyDbgLogErr("trans str to num failed, str=%s", strNum.c_str());
+    }
 }
 
 int32_t PoolUsageStat::GetPoolUsageInfo(uint32_t poolId, PoolUsageInfo *poolInfo)
@@ -87,6 +104,151 @@ mutex.unlock_shared();
 return 0;
 }
 
+int32_t PoolUsageStat::GetPoolInfo(uint32_t poolId, struct PoolInfo *info)
+{
+    mutex.lock_shared();
+    std::map<uint32_t, PoolUsageInfo>::iterator iter = poolInfoMap.find(poolId);
+    if (iter != poolInfoMap.end()) {
+        info->k = iter->second.k;
+        info->m = iter->second.m;
+        info->stripeUnit = iter->second.stripeUnit;
+    } else {
+        ProxyDbgLogErr("poolId not Exists poolId=%u", poolId);
+        mutex.unlock_shared();
+        return -ENOENT;
+    }
+    mutex.unlock_shared();
+    return 0;
+}
+
+int32_t PoolUsageStat::IsECPool(string poolName, string &ecProfile, bool &isEC)
+{
+    librados::Rados *rados = reinterpret_cast<librados::Rados *>(proxy->radosClient);
+    std::string cmd("{\"var\": \"erasure_code_profile\", \"prefix\": \"osd pool get\", \"pool\": \"");
+    std::string outs;
+    bufferlist inbl;
+    bufferlist outbl;
+    cmd.append(poolName);
+    cmd.append(string("\"}"));
+
+    int ret = rados->mon_command(cmd, inbl, &outbl, &outs);
+    if (ret < 0) {
+        if (ret == -EACCES) {
+            isEC = false;
+            return 0;
+        }
+        ProxyDbgLogErr("Get erasure code profile failed, name=%s, ret=%d", poolName.c_str(), ret);
+        return ret;
+    }
+
+    isEC = true;
+    std::regex expression("erasure_code_profile:\\s(\\S+)\\n?");
+    std::smatch result;
+    std::string outStr(outbl.to_str());
+    bool flag = std::regex_match(outStr, result, expression);
+    if (flag && result.size() > 1) {
+        ecProfile = result[1].str().c_str();
+    } else {
+        ProxyDbgLogErr("Get erasure code profile failed, name=%s, out=%s", poolName.c_str(), outbl.c_str());
+        return -1;
+    }
+
+    return 0;
+}
+
+int32_t PoolUsageStat::GetECProfileSize(std::string profileName, uint32_t &k, uint32_t &m, uint32_t &stripeUnit)
+{
+    librados::Rados *rados = reinterpret_cast<librados::Rados *>(proxy->radosClient);
+    std::string cmd("{\"prefix\": \"osd erasure-code-profile get\", \"name\": \"");
+    std::string outs;
+    bufferlist inbl;
+    bufferlist outbl;
+    cmd.append(profileName);
+    cmd.append(string("\"}"));
+
+    int ret = rados->mon_command(cmd, inbl, &outbl, &outs);
+    if (ret != 0) {
+        ProxyDbgLogErr("Get erasure code profile failed, profile=%s, ret=%d", profileName.c_str(), ret);
+        return ret;
+    }
+
+    if (globalStripeSize == 0) {
+        stripeUnit = GetDefaultECStripeUnit();
+        globalStripeSize = stripeUnit;
+    } else {
+        stripeUnit = globalStripeSize;
+    }
+
+    std::vector<string> infoVector;
+    char *strs = new char[outbl.to_str().size() + 1];
+    strcpy(strs, outbl.c_str());
+
+    char *p = strtok(strs, "\n");
+    while (p) {
+        string s = p;
+        infoVector.push_back(s);
+        p = strtok(NULL, "\n");
+    }
+
+    for (uint32_t i = 0; i < infoVector.size(); i++) {
+        ParseECProfile(infoVector[i], k, m, stripeUnit);
+    }
+    if (strs != nullptr) {
+        delete[] strs;
+        strs = nullptr;
+    }
+    return 0;
+}
+
+void PoolUsageStat::ParseECProfile(string &profile, uint32_t &k, uint32_t &m, uint32_t &stripeUnit)
+{
+    std::regex expression("(\\w+)=(\\w+)");
+    std::smatch result;
+    bool flag = std::regex_match(profile, result, expression);
+    if (!flag) {
+        return;
+    }
+    if (result[1].str().compare("k") == 0) {
+        k = atoi(result[2].str().c_str());
+    } else if (result[1].str().compare("m") == 0) {
+        m = atoi(result[2].str().c_str());
+    } else if (result[1].str().compare("stripe_unit") == 0) {
+        uint64_t val = 0;
+        TransStrToNum(result[2].str().c_str(), val);
+        if (val != 0) {
+            stripeUnit = static_cast<uint32_t>(val);
+        }
+        ProxyDbgLogDebug("EC stripe unit %u", stripeUnit);
+    }
+}
+
+uint32_t PoolUsageStat::GetDefaultECStripeUnit()
+{
+    uint32_t stripeUnit = defaultStripeUnit;
+    uint64_t num = 0;
+
+    librados::Rados *rados = reinterpret_cast<librados::Rados *>(proxy->radosClient);
+    std::string cmd("{\"prefix\": \"config get\", \"who\": "    \
+        "\"osd.-1\", \"key\": \"osd_pool_erasure_code_stripe_unit\"}");
+    std::string outs;
+    bufferlist inbl;
+    bufferlist outbl;
+    int ret = rados->mon_command(cmd, inbl, &outbl, &outs);
+    if (ret < 0) {
+        ProxyDbgLogErr("Get default failed, ret=%d", ret);
+        return ret;
+    }
+
+    string unit = outbl.to_str();
+    unit.replace(unit.find("\n"), 1, "");
+    TransStrToNum(unit, num);
+    if (num != 0) {
+        stripeUnit = static_cast<uint32_t>(num);
+    }
+    ProxyDbgLogDebug("default stripe unit %u", stripeUnit);
+    return stripeUnit;
+}
+
 int32_t PoolUsageStat::GetPoolReplicationSize(uint32_t poolId, double& rep)
 {
     rados_ioctx_t ioctx = proxy->GetIoCtx2(poolId);
@@ -111,69 +273,116 @@ int32_t PoolUsageStat::GetPoolReplicationSize(uint32_t poolId, double& rep)
     return 0;
 }
 
-int32_t PoolUsageStat::Record(std::smatch& result)
+int32_t PoolUsageStat::ParseToRecordInfo(std::smatch& result, struct RecordInfo &info)
 {
-    uint32_t poolId = 0;
-    double storedSize = 0.0;
-    uint64_t storedSizeUnit = 1;
-    double objectsNum = 0.0;
-    uint64_t numUnit = 1;
-    double usedSize = 0.0;
-    uint64_t usedSizeUnit = 1;
-    double maxAvail = 0.0;
-    uint64_t maxAvailUnit = 1;
-    double useRatio = 0.0;
-
     //
-    for (size_t i = 2; i < result.size(); i++) {
+    for (size_t i = 1; i < result.size(); i++) {
+        if (i == 1) {
+            info.poolName = result[i].str().c_str();
+        }
         if (i == 2) {
             int id = atoi(result[i].str().c_str());
             if (id < 0) {
                 return -1;
             }
-            poolId = (uint32_t)id;
+            info.poolId = (uint32_t)id;
         } else if (i == 3) {
-            storedSize = atof(result[i].str().c_str());
+            info.storedSize = atof(result[i].str().c_str());
         } else if (i == 4) {
-            storedSizeUnit = TransStrUnitToNum(result[i].str().c_str());
+            info.storedSizeUnit = TransStrUnitToNum(result[i].str().c_str());
         } else if (i == 5) {
-            objectsNum = atof(result[i].str().c_str());
+            info.objectsNum = atof(result[i].str().c_str());
         } else if (i == 6) {
             if (result[i].length() == 0) {
-                numUnit = 1;
+                info.numUnit = 1;
             } else if (strcmp(result[i].str().c_str(), "k") == 0) {
-                numUnit = 1000;
+                info.numUnit = 1024;
             } else if (strcmp(result[i].str().c_str(), "m") == 0) {
-                numUnit = 1000 * 1000;
+                info.numUnit = 1024 * 1024;
             }
         } else if (i == 7) {
-            usedSize = atof(result[i].str().c_str());
+            info.usedSize = atof(result[i].str().c_str());
         } else if (i == 8) {
-            usedSizeUnit = TransStrUnitToNum(result[i].str().c_str());
+            info.usedSizeUnit = TransStrUnitToNum(result[i].str().c_str());
         } else if (i == 9) {
-            useRatio = atof(result[i].str().c_str());
+            info.useRatio = atof(result[i].str().c_str());
         } else if (i == 10) {
-            maxAvail = atof(result[i].str().c_str());
+            info.maxAvail = atof(result[i].str().c_str());
         } else if (i == 11) {
-            maxAvailUnit = TransStrUnitToNum(result[i].str().c_str());
+            info.maxAvailUnit = TransStrUnitToNum(result[i].str().c_str());
         }
     }
-
-    double rep = 0.0;
-    int32_t ret = GetPoolReplicationSize(poolId, rep);
+    int32_t ret = IsECPool(info.poolName, info.profile, info.isEC);
     if (ret != 0) {
-        ProxyDbgLogErr("get replicaiton size failed, poolId=%u", poolId);
+        ProxyDbgLogErr("judge EC pool failed, poolId=%u", info.poolId);
         return -1;
     }
+
+    return 0;
+}
+
+int32_t PoolUsageStat::CalPoolSize(struct RecordInfo &info)
+{
+    int ret = 0;
+    if (info.isEC) {
+        ret = GetECProfileSize(info.profile, info.ec_k, info.ec_m, info.stripeUnit);
+        if (ret != 0) {
+            ProxyDbgLogErr("get EC size failed, poolId=%u", info.poolId);
+            return -1;
+        }
+        info.rep = (info.ec_k + info.ec_m) * 1.0 / info.ec_k;
+    } else {
+        info.ec_k = defaultECKInReplica;
+        info.ec_m = defaultECMInReplica;
+        if (globalStripeSize == 0) {
+            info.stripeUnit = GetDefaultECStripeUnit();
+            globalStripeSize = info.stripeUnit;
+        } else {
+            info.stripeUnit = globalStripeSize;
+        }
+        ret = GetPoolReplicationSize(info.poolId, info.rep);
+        if (ret != 0) {
+            ProxyDbgLogErr("get replication size failed, poolId=%u", info.poolId);
+            return -1;
+        }
+    }
+    return 0;
+}
+
+int32_t PoolUsageStat::Record(std::smatch &result)
+{
+    struct RecordInfo info;
+    memset(&info, 0, sizeof(info));
+    info.storedSizeUnit = 1;
+    info.numUnit = 1;
+    info.usedSizeUnit = 1;
+    info.maxAvailUnit = 1;
+    info.isEC = false;
+
+    int32_t ret = ParseToRecordInfo(result, info);
+    if (ret < 0) {
+        return -1;
+    }
+
+    ret = CalPoolSize(info);
+    if (ret < 0) {
+        return ret;
+    }
+
     mutex.lock();
-    tmpPoolInfoMap[poolId].storedSize = (uint64_t)(storedSize * storedSizeUnit);
-    tmpPoolInfoMap[poolId].objectsNum = (uint64_t)(objectsNum * numUnit);
-    tmpPoolInfoMap[poolId].usedSize = (uint64_t)(usedSize * usedSizeUnit);
-    tmpPoolInfoMap[poolId].useRatio = useRatio;
-    tmpPoolInfoMap[poolId].maxAvail = (uint64_t)(maxAvail * maxAvailUnit * rep);
-    poolList.push_back(poolId);
+    tmpPoolInfoMap[info.poolId].storedSize = (uint64_t)(info.storedSize * info.storedSizeUnit);
+    tmpPoolInfoMap[info.poolId].objectsNum = (uint64_t)(info.objectsNum * info.numUnit);
+    tmpPoolInfoMap[info.poolId].usedSize = (uint64_t)(info.usedSize * info.usedSizeUnit);
+    tmpPoolInfoMap[info.poolId].useRatio = info.useRatio;
+    tmpPoolInfoMap[info.poolId].maxAvail = (uint64_t)(info.maxAvail * info.maxAvailUnit * info.rep);
+    tmpPoolInfoMap[info.poolId].k = info.ec_k;
+    tmpPoolInfoMap[info.poolId].m = info.ec_m;
+    tmpPoolInfoMap[info.poolId].stripeUnit = info.stripeUnit;
+    tmpPoolInfoMap[info.poolId].isEC = info.isEC;
+    poolList.push_back(info.poolId);
     mutex.unlock();
-    ProxyDbgLogDebug("detect pool, poolId=%u", poolId);
+    ProxyDbgLogDebug("detect pool, poolId=%u, poolName=%s, isEC=%d, k=%u, m=%u, stripeUnit=%u",
+        info.poolId, info.poolName.c_str(), info.isEC, info.ec_k, info.ec_m, info.stripeUnit);
     return 0;
 }
 
@@ -189,6 +398,10 @@ void PoolUsageStat::Compare()
         poolInfoMap[poolId].usedSize = tmpPoolInfoMap[poolId].usedSize;
         poolInfoMap[poolId].useRatio = tmpPoolInfoMap[poolId].useRatio;
         poolInfoMap[poolId].maxAvail = tmpPoolInfoMap[poolId].maxAvail;
+        poolInfoMap[poolId].k = tmpPoolInfoMap[poolId].k;
+        poolInfoMap[poolId].m = tmpPoolInfoMap[poolId].m;
+        poolInfoMap[poolId].isEC = tmpPoolInfoMap[poolId].isEC;
+        poolInfoMap[poolId].stripeUnit = tmpPoolInfoMap[poolId].stripeUnit;
         ProxyDbgLogDebug("update pool info, poolId=%u", poolId);
     }
 

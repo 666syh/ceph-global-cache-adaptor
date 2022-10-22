@@ -27,10 +27,6 @@ struct QosParam {
     uint32_t getQuotaCycle { 200 };
     uint32_t enableThrottle { 0 };
     uint64_t saOpThrottle { 5000 };
-    uint64_t writeOpThrottle { 5000 };
-    uint64_t readOpThrottle { 5000 };
-    uint64_t writeBWThrottle { 1024000 };
-    uint64_t readBWThrottle { 1024000 };
 };
 
 typedef struct CloneInfo {
@@ -106,11 +102,11 @@ class NetworkModule {
     std::mutex limitWriteMtx;
     std::condition_variable limitWriteCond {};
 
-    volatile int lwtCount { 0 };
+    volatile uint64_t lwtCount { 0 };
     std::mutex lwtCountMtx;
-    volatile int lwtWriteCount { 0 };
+    volatile uint64_t lwtWriteCount { 0 };
     std::mutex lwtWriteCountMtx;
-    volatile int lwtReadCount { 0 };
+    volatile uint64_t lwtReadCount { 0 };
     std::mutex lwtReadCountMtx;
     volatile uint64_t writeBW { 0 };
     std::mutex writeBWMtx;

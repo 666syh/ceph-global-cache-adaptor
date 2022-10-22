@@ -63,6 +63,12 @@ bool IsDigit(const char *c, uint32_t length)
    return true;
 }
 
+static bool CheckClassList(const string &cname)
+{
+    static vector<string> ClassList = { "rgw", "lock" };
+    return find(ClassList.begin(), ClassList.end(), cname) != ClassList.end();
+}
+
 bool CheckLocalIp(const string &ipaddr)
 {
     bool ret = false;
@@ -128,12 +134,9 @@ int OSA_Init(SaExport &sa)
 #else
     Salog(LV_WARNING, LOG_TYPE, "OSA_Init %sD", curDate);
 #endif
-    string filePath = sa.GetConfPath(); 
-    filePath += "config_sa.conf";
-    Salog(LV_INFORMATION, LOG_TYPE, "OSA conf_file path is %s", filePath.c_str());
-    
+
     OsaConfigRead readConfig;
-    if (readConfig.CacheClusterConfigInit(filePath.c_str())) {
+    if (readConfig.CacheClusterConfigInit()) {
 	    Salog(LV_CRITICAL, LOG_TYPE, "error : read config file.");
 	    return ERROR_PORT;
     }
@@ -217,13 +220,8 @@ int OSA_Init(SaExport &sa)
     qos.getQuotaCycle = readConfig.GetQuotCyc();
     qos.enableThrottle = readConfig.GetMessengerThrottle();
     qos.saOpThrottle = readConfig.GetSaOpThrottle();
-    qos.writeOpThrottle = readConfig.GetWriteOpThrottle();
-    qos.readOpThrottle = readConfig.GetReadOpThrottle();
-    qos.writeBWThrottle = readConfig.GetWriteBWThrottle();
-    qos.readBWThrottle = readConfig.GetReadBWThrottle();
-    Salog(LV_WARNING, LOG_TYPE, "SA QoS limitWrite=%d, time_cyc=%d ms, enableThrottle=%d, opThrottle=%lu, writeOpThrottle=%lu, "
-        "readOpThrottle=%lu, writeBWThrottle=%lu, readBWThrottle=%lu", qos.limitWrite, qos.getQuotaCycle, qos.enableThrottle,
-        qos.saOpThrottle, qos.writeOpThrottle, qos.readOpThrottle, qos.writeBWThrottle, qos.readBWThrottle);
+    Salog(LV_WARNING, LOG_TYPE, "SA QoS limitWrite=%d, time_cyc=%d ms, enableThrottle=%d, opThrottle=%lu",
+        qos.limitWrite, qos.getQuotaCycle, qos.enableThrottle, qos.saOpThrottle);
 
     if (qos.getQuotaCycle < 1) {
         Salog(LV_CRITICAL, LOG_TYPE, "error : get quota cycle is %d", qos.getQuotaCycle);
@@ -233,29 +231,13 @@ int OSA_Init(SaExport &sa)
         Salog(LV_CRITICAL, LOG_TYPE, "error : get quota cycle is %d, should in {0, [2000~30000]}", qos.saOpThrottle);
         return ERROR_PORT;
     }
-    if ((qos.writeOpThrottle != 0) && (qos.writeOpThrottle < 10 || qos.writeOpThrottle > 10000)) {
-        Salog(LV_CRITICAL, LOG_TYPE, "error : write op throttle is %d, should in {0, [10~10000]}", qos.writeOpThrottle);
-        return ERROR_PORT;
-    }
-    if ((qos.readOpThrottle != 0) && (qos.readOpThrottle < 10 || qos.readOpThrottle > 10000)) {
-        Salog(LV_CRITICAL, LOG_TYPE, "error : read op throttle is %d, should in {0, [10~10000]}", qos.readOpThrottle);
-        return ERROR_PORT;
-    }
-    if ((qos.writeBWThrottle != 0) && (qos.writeBWThrottle < 10 || qos.writeBWThrottle > 102400)) {
-        Salog(LV_CRITICAL, LOG_TYPE, "error : write bw throttle is %d, should in {0, [10~102400]}", qos.writeBWThrottle);
-        return ERROR_PORT;
-    }
-    if ((qos.readBWThrottle != 0) && (qos.readBWThrottle < 10 || qos.readBWThrottle > 102400)) {
-        Salog(LV_CRITICAL, LOG_TYPE, "error : read bw throttle is %d, should in {0, [10~102400]}", qos.readBWThrottle);
-        return ERROR_PORT;
-    }
 
     char szMsgrAmount[4] = {0};
     sprintf(szMsgrAmount, "%d", msgrAmount);
     Salog(LV_INFORMATION, LOG_TYPE, "Server adaptor init queueAmount=%d szMsgrAmount=%s bindCore=%d bindSaCore=%d",
 		    queueAmount, szMsgrAmount, bindCore, bindSaCore);
 
-    vector<const char *> args = { "--conf", "/opt/gcache/conf/config_sa.conf" };
+    vector<const char *> args = { "--conf", "/opt/gcache/conf/gcache.conf" };
     map<string, string> defaults = { { "ms_async_op_threads", szMsgrAmount } };
     static auto cct = global_init(&defaults, args, 0xFF /* 0xFF CEPH_ENTITY_TYPE_ANY */,
 	    CODE_ENVIRONMENT_LIBRARY /*CODE_ENVIRONMENT_LIBRARY CODE_ENVIRONMENT_DAEMON */,
@@ -384,8 +366,16 @@ void OSA_EncodeListSnaps(const ObjSnaps *objSnaps, int i, void *p)
 
 int OSA_ExecClass(SaOpContext *pctx, PREFETCH_FUNC prefetch)
 {
+    if (pctx == nullptr) {
+        Salog(LV_ERROR, LOG_TYPE, " osa ctx %p is null, skip", pctx);
+        return -EINVAL;
+    }
     struct SaOpReq * pOpReq = pctx->opReq;
     MOSDOp *ptr = reinterpret_cast<MOSDOp *>(pOpReq->ptrMosdop);
+    if (ptr == nullptr) {
+        Salog(LV_ERROR, LOG_TYPE, " mosdop %p is null, skip", ptr);
+        return -EINVAL;
+    }
     OSDOp &clientop = ptr->ops[pctx->opId];
     string cname, mname;
     bufferlist indata;
@@ -420,6 +410,11 @@ int OSA_ExecClass(SaOpContext *pctx, PREFETCH_FUNC prefetch)
         Salog(LV_DEBUG, LOG_TYPE, "finish write, tid=%ld", pOpReq->tid);
         *pOpReq->copyupFlag = 0;
         return ret;
+    }
+
+    if (!CheckClassList(cname)) {
+        Salog(LV_ERROR, LOG_TYPE, "class [%s] not in whitelist ret [%d]", cname.c_str(), -EOPNOTSUPP);
+        return -EOPNOTSUPP;
     }
     ClassHandler::ClassData *cls;
     int ret = rpc_handler->open_class(cname, &cls);

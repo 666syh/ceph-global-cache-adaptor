@@ -10,6 +10,8 @@ ROOT_DIR=${FILE_PATH}
 CMAKE_ROOT_DIR=${ROOT_DIR}
 TEST_BIN_DIR="${FILE_PATH}/test/bin"
 
+cpu_type=$(uname -m)
+
 main()
 {
         rm -rf ${BUILD_DIR}
@@ -26,13 +28,25 @@ main()
         fi
         if [ "$debug" = "DEBUG" ] ; then
                 echo "Build global_cache_adaptor DEBUG."
-                ${CMAKE} ${CMAKE_ROOT_DIR} -DCMAKE_SKIP_RPATH=true 
+                if [ "${cpu_type}" = "aarch64" ] ; then
+                        ${CMAKE} ${CMAKE_ROOT_DIR} -DCMAKE_SKIP_RPATH=true
+                else
+                        ${CMAKE} ${CMAKE_ROOT_DIR} -DCMAKE_SKIP_RPATH=true -DPROXY_ONLY=true -DCPU_TYPE=${cpu_type}
+                fi
         elif [ "$debug" = "ASAN" ] ; then
                 echo "Build global_cache_adaptor DEBUG with ASAN."
-                ${CMAKE} ${CMAKE_ROOT_DIR} -DCMAKE_SKIP_RPATH=true -DUSE_ASAN=True
+                if [ "${cpu_type}" = "aarch64" ] ; then
+                        ${CMAKE} ${CMAKE_ROOT_DIR} -DCMAKE_SKIP_RPATH=true -DUSE_ASAN=True
+                else
+                        ${CMAKE} ${CMAKE_ROOT_DIR} -DCMAKE_SKIP_RPATH=true -DPROXY_ONLY=true -DCPU_TYPE=${cpu_type}
+                fi
         else
                 echo "Build global_cache_adaptor RELEASE."
-                ${CMAKE} ${CMAKE_ROOT_DIR} -DCMAKE_BUILD_TYPE=RELEASE -DCMAKE_SKIP_RPATH=true 
+                if [ "${cpu_type}" = "aarch64" ] ; then
+                        ${CMAKE} ${CMAKE_ROOT_DIR} -DCMAKE_BUILD_TYPE=RELEASE -DCMAKE_SKIP_RPATH=true
+                else
+                        ${CMAKE} ${CMAKE_ROOT_DIR} -DCMAKE_BUILD_TYPE=RELEASE -DCMAKE_SKIP_RPATH=true -DPROXY_ONLY=true -DCPU_TYPE=${cpu_type}
+                fi
         fi
         make -j16
 }

@@ -249,7 +249,10 @@ int cls_cxx_stat2(cls_method_context_t hctx, uint64_t *size, ceph::real_time *mt
 	op.opSubType = CEPH_OSD_OP_STAT;
 	op.isRbd = pOpReq->vecOps[pctx->opId].isRbd;
 	op.rbdObjId.head = pOpReq->vecOps[pctx->opId].rbdObjId.head;
-	op.rbdObjId.sequence = pOpReq->vecOps[pctx->opId].rbdObjId.sequence;
+	op.rbdObjId.seq = pOpReq->vecOps[pctx->opId].rbdObjId.seq;
+	op.rbdObjId.version = pOpReq->vecOps[pctx->opId].rbdObjId.version;
+	op.rbdObjId.format = pOpReq->vecOps[pctx->opId].rbdObjId.format;
+	op.rbdObjId.poolId = pOpReq->vecOps[pctx->opId].rbdObjId.poolId;
 	op.objName = pOpReq->vecOps[pctx->opId].objName; // ptr->get_oid().name;
 
 	vector<OSDOp> ops(1);
@@ -330,7 +333,10 @@ int cls_cxx_write2(cls_method_context_t hctx, int ofs, int len, bufferlist *inbl
 	op.opSubType = CEPH_OSD_OP_WRITE;
 	op.isRbd = pOpReq->vecOps[pctx->opId].isRbd;
 	op.rbdObjId.head = pOpReq->vecOps[pctx->opId].rbdObjId.head;
-	op.rbdObjId.sequence = pOpReq->vecOps[pctx->opId].rbdObjId.sequence;
+	op.rbdObjId.seq = pOpReq->vecOps[pctx->opId].rbdObjId.seq;
+	op.rbdObjId.version = pOpReq->vecOps[pctx->opId].rbdObjId.version;
+	op.rbdObjId.format = pOpReq->vecOps[pctx->opId].rbdObjId.format;
+	op.rbdObjId.poolId = pOpReq->vecOps[pctx->opId].rbdObjId.poolId;
 	op.objName = pOpReq->vecOps[pctx->opId].objName; // ptr->get_oid().name;
 	op.objOffset = ofs;
 	op.objLength = len;

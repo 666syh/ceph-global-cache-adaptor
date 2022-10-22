@@ -6,6 +6,7 @@ set(lib_dpax_include_dir ${GLOBAL_CACHE_DIR}/src/include/infras/infrastructure/o
 set(lib_lvos_include_idr ${GLOBAL_CACHE_DIR}/src/include/infras/infrastructure/lvos)
 set(lib_ftds_include_dir ${GLOBAL_CACHE_DIR}/src/include/infras/ftds)
 set(lib_dplog_include_dir ${GLOBAL_CACHE_DIR}/src/include/infras/infrastructure/log)
+set(lib_confparser_include_dir ${GLOBAL_CACHE_DIR}/src/include/infras/infrastructure/conf_parser)
 set(lib_dpax_redef_include_dir ${GLOBAL_CACHE_DIR}/src/include/infras)
 set(third_part_dir /opt/gcache_adaptor_compile/third_part)
 set(CMAKE_SKIP_RPATH true)
@@ -61,6 +62,14 @@ find_library(DPLOG_LIB
 	${third_part_dir}/lib
 )
 
+find_library(CONFPARSER_LIB
+    NAMES
+    libconfparser.so
+    PATHS
+    ${GLOBAL_CACHE_DIR}/build/my_pkg_root/lib
+    ${third_part_dir}/lib
+)
+
 find_library(DPOSAX_LIB
     NAMES
     libdposax.so
@@ -74,9 +83,10 @@ if (${CMAKE_BUILD_TYPE} STREQUAL "RELEASE")
     message(STATUS "Proxy cmake this is Release")
     target_compile_options(proxy PRIVATE -std=c++17 -g -DDPAX_LOG
 	    				-fstack-protector-all
-					-fno-omit-frame-pointer
-					-fPIC
-					-D_FORTIFY_SOURCE=2 -O2)
+                        -fvisibility=hidden
+                        -fno-omit-frame-pointer
+                        -fPIC
+                        -D_FORTIFY_SOURCE=2 -O2)
     target_compile_options(proxy PRIVATE -DFTDS_ON)
 
     target_link_options(proxy PRIVATE -Wl,-z,relro,-z,now
@@ -100,6 +110,7 @@ target_include_directories(proxy PRIVATE ${lib_rados_include_dir}
 					 ${lib_lvos_include_idr}
 					 ${lib_ftds_include_dir}
 					 ${lib_dplog_include_dir}
+                     ${lib_confparser_include_dir}
                      ${lib_dpax_redef_include_dir})
 
-target_link_libraries(proxy PUBLIC ${RADOS_LIB} ${RBD_LIB} ${FTDS_LIB} ${DPLOG_LIB} ${DPOSAX_LIB} -lpthread)
+target_link_libraries(proxy PUBLIC ${RADOS_LIB} ${RBD_LIB} ${FTDS_LIB} ${DPLOG_LIB} ${DPOSAX_LIB} ${CONFPARSER_LIB} -lpthread)

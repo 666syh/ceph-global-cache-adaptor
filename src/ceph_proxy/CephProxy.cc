@@ -242,6 +242,11 @@ int CephProxy::GetPoolStat(rados_ioctx_t ctx, CephPoolStat *stat)
 	return RadosGetPoolStat(radosClient, ctx, stat);
 }
 
+int CephProxy::GetPoolsStat(CephPoolStat *stat, uint64_t *poolId, uint32_t poolNum)
+{
+	return RadosGetPoolsStat(radosClient, stat, poolId, poolNum);
+}
+
 int CephProxy::GetPoolUsedSizeAndMaxAvail(uint64_t &usedSize, uint64_t &maxAvail)
 {
     if (poolStatManager == nullptr) {
@@ -260,6 +265,16 @@ int CephProxy::RegisterPoolNewNotifyFn(NotifyPoolEventFn fn)
     }
 
     return poolStatManager->RegisterPoolNewNotifyFn(fn);
+}
+
+int CephProxy::GetPoolInfo(uint32_t poolId, struct PoolInfo *info)
+{
+    if (poolStatManager == nullptr) {
+        ProxyDbgLogErr("proxy is not working.");
+        return -1;
+    }
+
+	return poolStatManager->GetPoolInfo(poolId, info);
 }
 
 int CephProxy::GetMinAllocSize(uint32_t *minAllocSize, CEPH_BDEV_TYPE_E type)

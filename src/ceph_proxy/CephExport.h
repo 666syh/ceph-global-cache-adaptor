@@ -11,52 +11,28 @@
 extern "C" {
 #endif
 
-int CephLibrbdSnapRemove(int64_t pool_id,
+#ifndef PROXY_API_PUBLIC
+#define PROXY_API_PUBLIC __attribute__((visibility ("default")))
+#endif
+
+PROXY_API_PUBLIC int CephLibrbdSnapRemove(int64_t pool_id,
 		const char* namespace_name,
 		const char* image_id,
 		uint64_t snap_id,
 		bool force);
 
-int CephLibrbdSnapCreate(const char* pool_name,
-	int64_t pool_id,
-	const char* namespace_name,
-	const char* image_name,
-	const char* image_id,
-	const char* snap_name,
-	uint64_t* snap_id);
-
-int CephLibrbdSnapList(const char* _pool_name,
-	int64_t pool_id,
-	const char* _namespace_name,
-	const char* _image_name,
-	const char* _image_id,
-	uint64_t** snap_map_id,
-	char*** snap_map_name,
-	int* snap_map_length);
-
-
-void CephLibrbdSnapListEnd(uint64_t** snap_map_id,
-	char*** snap_map_name,
-	int snap_map_length);
-
-int CephLibrbdGetPoolId(const std::string& pool_name, int64_t& pool_id,
-	const std::string& namespace_name);
-
-
 int CephLibrbdGetPoolName(std::string& pool_name, int64_t pool_id,
 	const std::string& namespace_name);
-
-
-int CephLibrbdGetImageId(const std::string& pool_name, int64_t pool_id,
-	std::string& image_id, const std::string& image_name,
-	const std::string& namespace_name);
-
 
 int CephLibrbdGetImageName(const std::string& pool_name, int64_t pool_id,
 	const std::string& image_id, std::string& image_name,
 	const std::string& namespace_name);
 
-int CephLibrbdDiskUsage(uint64_t *usage);
+PROXY_API_PUBLIC int CephLibrbdGetImageInfo(int64_t pool_id,
+						const char *_image_id,
+						int32_t *num_objs);
+
+PROXY_API_PUBLIC int CephLibrbdDiskUsage(uint64_t *usage);
 
 #ifdef __cplusplus
 }

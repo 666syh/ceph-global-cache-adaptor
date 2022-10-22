@@ -6,7 +6,7 @@ set(INSTALL_LIBDIR "lib64")
 set(CMAKE_CXX_FLAGS " ")
 if (${CMAKE_BUILD_TYPE} STREQUAL "RELEASE")
     message("OpenServerAdaptor cmake This is RELEASE")
-    set(COMPILE_FLAGS "-Wl,-z,relro,-z,now -s -fstack-protector-all -D_FILE_OFFSET_BITS=64 -D_GNU_SOURCE -D__linux__ -Wall -Wtype-limits -Wignored-qualifiers -Winit-self -Wpointer-arith -fno-strict-aliasing -fsigned-char -Wno-unknown-pragmas -rdynamic  -ftemplate-depth-1024 -Wnon-virtual-dtor -Wno-unknown-pragmas -Wno-ignored-qualifiers -Wstrict-null-sentinel -Woverloaded-virtual -fno-new-ttp-matching -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 -fstack-protector-strong -fdiagnostics-color=auto -fno-builtin-malloc -fno-builtin-calloc -fno-builtin-realloc -fno-builtin-free -O2 -DNDEBUG -fPIE -DHAVE_CONFIG_H -D__CEPH__ -D_REENTRANT -D_THREAD_SAFE -D__STDC_FORMAT_MACROS -std=c++1z -ldl -lrt -lresolv -lpthread")
+    set(COMPILE_FLAGS "-Wl,-z,relro,-z,now -s -fstack-protector-all -D_FILE_OFFSET_BITS=64 -D_GNU_SOURCE -D__linux__ -Wall -Wtype-limits -Wignored-qualifiers -Winit-self -Wpointer-arith -fno-strict-aliasing -fsigned-char -Wno-unknown-pragmas -rdynamic  -ftemplate-depth-1024 -Wnon-virtual-dtor -Wno-unknown-pragmas -Wno-ignored-qualifiers -Wstrict-null-sentinel -Woverloaded-virtual -fno-new-ttp-matching -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 -fstack-protector-strong -fdiagnostics-color=auto -fno-builtin-malloc -fno-builtin-calloc -fno-builtin-realloc -fno-builtin-free -O2 -DNDEBUG -fPIE -DHAVE_CONFIG_H -D__CEPH__ -D_REENTRANT -D_THREAD_SAFE -D__STDC_FORMAT_MACROS -std=c++1z -ldl -lrt -lresolv -lpthread -fvisibility=hidden")
 else()
     message("OpenServerAdaptor cmake This is DEBUG.")
     set(COMPILE_FLAGS "-Wl,-z,relro,-z,now -fstack-protector-all -D_FILE_OFFSET_BITS=64 -D_GNU_SOURCE -D__linux__ -Wall -Wtype-limits -Wignored-qualifiers -Winit-self -Wpointer-arith -fno-strict-aliasing -fsigned-char -Wno-unknown-pragmas -rdynamic  -ftemplate-depth-1024 -Wnon-virtual-dtor -Wno-unknown-pragmas -Wno-ignored-qualifiers -Wstrict-null-sentinel -Woverloaded-virtual -fno-new-ttp-matching -U_FORTIFY_SOURCE  -fstack-protector-strong -fdiagnostics-color=auto -fno-builtin-malloc -fno-builtin-calloc -fno-builtin-realloc -fno-builtin-free -O0 -g -fPIE -DHAVE_CONFIG_H -D__CEPH__ -D_REENTRANT -D_THREAD_SAFE -D__STDC_FORMAT_MACROS -std=c++1z -ldl -lrt -lresolv -lpthread")
@@ -66,6 +66,13 @@ if (NOT GLOBAL_CACHE_DIR)
 endif()
 message("GLOBAL_CACHE_DIR=${GLOBAL_CACHE_DIR}")
 
+find_library(CONFPARSER_LIB
+    NAMES
+    libconfparser.so
+    PATHS
+    ${GLOBAL_CACHE_DIR}/build/my_pkg_root/lib
+)
+
 target_include_directories(${OSA}
   PUBLIC
   .
@@ -79,6 +86,7 @@ target_link_libraries(${OSA}
   ${CEPH_COMMON_LIB}
   ${GLOBAL}
   ${ERASURE_CODE}
+  ${CONFPARSER_LIB}
 )
 
 install(TARGETS ${OSA} LIBRARY DESTINATION ${INSTALL_LIBDIR})

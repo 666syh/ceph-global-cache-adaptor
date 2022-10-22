@@ -39,6 +39,12 @@ constexpr int GCACHE_READ = 2;
 
 constexpr int SA_QOS_MAX_NUM = 200;
 
+constexpr int SA_VERSION = 1;
+enum {
+    FORMAT_UNSPECIFY_MD_DATE_POOL = 0,
+    FORMAT_SPECIFY_MD_DATE_POOL = 1,
+};
+
 struct OptionsType {
     uint32_t write;
     uint32_t read;
@@ -48,18 +54,14 @@ struct OptionsLength {
     uint64_t read;
 };
 
-struct RbdObjid {
-    RbdObjid()
-    {
-	rbdd[INDEX_ZERO] = 'R';
-	rbdd[INDEX_ONE] = 'b';
-	rbdd[INDEX_TWO] = 'd';
-	rbdd[INDEX_THREE] = 'd';
-    }
-    char rbdd[4];
-    uint64_t head { 0 };
-    uint64_t sequence { 0 };
-} __attribute__((packed, aligned(4)));
+typedef struct {
+    uint32_t poolId;
+    uint64_t head;
+    uint64_t seq : 40;
+    uint64_t format : 8;
+    uint64_t version : 8;
+    uint64_t reserve : 8;
+} __attribute__((packed, aligned(4))) RbdObjid;
 
 struct OpRequestOps {
     uint64_t opSubType {0};

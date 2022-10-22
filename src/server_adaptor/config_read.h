@@ -30,41 +30,21 @@
 
 class OsaConfigRead {
 public:
-    uint32_t GetLocalIpv4Addr();
-    uint32_t GetLocalPort();
-    char *GetLocalIpv4AddrStr();
-    char *GetZkServerList();
-
-    uint32_t IsUseOneSideRDMA();
-    uint32_t GetGvaSlabObjNum();
-
-    int32_t GetIodCore(uint32_t *cores, uint32_t maxCoreNum);
-    int32_t GetXnetCore(uint32_t *cores, uint32_t maxCoreNum);
-    int32_t GetDpshmCore(uint32_t *cores, uint32_t maxCoreNum);
-
-    int32_t CacheClusterConfigInit(const char *filepath);
+    int32_t CacheClusterConfigInit();
 
     char *GetListenIp();
     char *GetListenPort();
-    char *GetSendIp();
-    char *GetSendPort();
-    char *GetTestMode();
     char *GetCoreNumber();
     uint32_t GetQueueAmount();
     uint32_t GetMsgrAmount();
     uint32_t GetBindCore();
     uint32_t GetBindQueueCore();
-    uint32_t GetPerf();
     uint32_t GetQueueMaxCapacity();
 
     uint32_t GetWriteQoS();
     uint32_t GetQuotCyc();
     uint32_t GetMessengerThrottle();
     uint64_t GetSaOpThrottle();
-    uint64_t GetWriteOpThrottle();
-    uint64_t GetReadOpThrottle();
-    uint64_t GetWriteBWThrottle();
-    uint64_t GetReadBWThrottle();
 };
 
 #endif

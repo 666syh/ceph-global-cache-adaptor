@@ -16,15 +16,19 @@ int CephProxyInit(const char *conf, size_t wNum, const char *log,
 	         ceph_proxy_t *proxy)
 {
     int ret = 0;
+	if (conf == nullptr || log == nullptr || proxy == nullptr) {
+		ProxyDbgLogErr("conf %p or log %p or proxy %p should not nullptr", conf, log, proxy);
+		return -EINVAL;
+	}
     std::string config(conf);
     std::string logPath(log);
 
     CephProxy *cephProxy = CephProxy::GetProxy();
     ret = cephProxy->Init(config, logPath, wNum);
     if (ret < 0) {
-	ProxyDbgLogErr("CephProxy Inif failed: %d", ret);
-	*proxy = nullptr;
-	return ret;
+		ProxyDbgLogErr("CephProxy Init failed: %d", ret);
+		*proxy = nullptr;
+		return ret;
     }
     *proxy = cephProxy;
     return ret;
@@ -33,6 +37,10 @@ int CephProxyInit(const char *conf, size_t wNum, const char *log,
 void CephProxyShutdown(ceph_proxy_t proxy)
 {
     CephProxy *cephProxy = static_cast<CephProxy *>(proxy);
+	if (cephProxy == nullptr) {
+		ProxyDbgLogErr("proxy %p is invalid", cephProxy);
+		return;
+	}
     cephProxy->Shutdown();
     cephProxy->instance = NULL;
     delete cephProxy;
@@ -47,6 +55,10 @@ ceph_proxy_t GetCephProxyInstance(void)
 int32_t CephProxyQueueOp(ceph_proxy_t proxy, ceph_proxy_op_t op, completion_t c)
 {
     CephProxy *cephProxy = reinterpret_cast<CephProxy*>(proxy);
+	if (cephProxy == nullptr) {
+		ProxyDbgLogErr("proxy %p is invalid", cephProxy);
+		return -EINVAL;
+	}
     return cephProxy->Enqueue(op, c);
 }
 
@@ -59,12 +71,20 @@ rados_ioctx_t CephProxyGetIoCtx(ceph_proxy_t proxy, const char *poolname)
 rados_ioctx_t CephProxyGetIoCtx2(ceph_proxy_t proxy, const int64_t poolId)
 {
 	CephProxy *cephProxy = reinterpret_cast<CephProxy *>(proxy);
+	if (cephProxy == nullptr) {
+		ProxyDbgLogErr("proxy %p is invalid", cephProxy);
+		return nullptr;
+	}
 	return cephProxy->GetIoCtx2(poolId);
 }
 
 rados_ioctx_t CephProxyGetIoCtxFromCeph(ceph_proxy_t proxy, const int64_t poolId)
 {
 	CephProxy *cephProxy = reinterpret_cast<CephProxy *>(proxy);
+	if (cephProxy == nullptr) {
+		ProxyDbgLogErr("proxy %p is invalid", cephProxy);
+		return nullptr;
+	}
 	return cephProxy->GetIoCtxFromCeph(poolId);
 }
 
@@ -100,13 +120,31 @@ int CephProxyGetMinAllocSize(ceph_proxy_t proxy, uint32_t *minAllocSize, CEPH_BD
 int CephProxyGetClusterStat(ceph_proxy_t proxy, CephClusterStat *result)
 {
 	CephProxy *cephProxy = reinterpret_cast<CephProxy *>(proxy);
+	if (cephProxy == nullptr || result == nullptr) {
+		ProxyDbgLogErr("proxy %p or result %p is invalid", cephProxy, result);
+		return -EINVAL;
+	}
 	return cephProxy->GetClusterStat(result);
 }
 
 int CephProxyGetPoolStat(ceph_proxy_t proxy, rados_ioctx_t io, CephPoolStat *stats)
 {
 	CephProxy *cephProxy = reinterpret_cast<CephProxy *>(proxy);
+	if (cephProxy == nullptr || stats == nullptr) {
+		ProxyDbgLogErr("proxy %p or stats %p is invalid", cephProxy, stats);
+		return -EINVAL;
+	}
 	return cephProxy->GetPoolStat(io, stats);
+}
+
+int CephProxyGetPoolsStat(ceph_proxy_t proxy, CephPoolStat *stats, uint64_t *poolId, uint32_t poolNum)
+{
+	CephProxy *cephProxy = reinterpret_cast<CephProxy *>(proxy);
+	if (cephProxy == nullptr) {
+		ProxyDbgLogErr("proxy %p is invalid", cephProxy);
+		return -EINVAL;
+	}
+	return cephProxy->GetPoolsStat(stats, poolId, poolNum);
 }
 
 int CephProxyGetState(ceph_proxy_t proxy)
@@ -118,6 +156,10 @@ int CephProxyGetState(ceph_proxy_t proxy)
 int CephProxyGetUsedSizeAndMaxAvail(ceph_proxy_t proxy, uint64_t &usedSize, uint64_t &maxAvail)
 {
 	CephProxy *cephProxy = reinterpret_cast<CephProxy *>(proxy);
+	if (cephProxy == nullptr) {
+		ProxyDbgLogErr("proxy %p is invalid", cephProxy);
+		return -EINVAL;
+	}
 	return cephProxy->GetPoolUsedSizeAndMaxAvail(usedSize, maxAvail);
 }
 
@@ -125,11 +167,29 @@ int CephProxyRegisterPoolNewNotifyFn(NotifyPoolEventFn fn)
 {
 	ceph_proxy_t proxy = GetCephProxyInstance();
 	CephProxy *cephProxy = reinterpret_cast<CephProxy *>(proxy);
+	if (cephProxy == nullptr) {
+		ProxyDbgLogErr("proxy %p is invalid", cephProxy);
+		return -EINVAL;
+	}
 	return cephProxy->RegisterPoolNewNotifyFn(fn);
+}
+
+int CephProxyGetPoolInfo(ceph_proxy_t proxy, uint32_t poolId, struct PoolInfo *info)
+{
+	CephProxy *cephProxy = reinterpret_cast<CephProxy *>(proxy);
+	if (cephProxy == nullptr || info == nullptr) {
+		ProxyDbgLogErr("proxy %p or pool info %p is invalid", cephProxy, info);
+		return -EINVAL;
+	}
+	return cephProxy->GetPoolInfo(poolId, info);
 }
 
 int CephProxyWriteOpInit2(ceph_proxy_op_t *op, const int64_t poolId, const char* oid)
 {
+	if (op == nullptr || oid == nullptr) {
+		ProxyDbgLogErr("op %p or oid %p is invalid", op, oid);
+		return -EINVAL;
+	}
 	*op = RadosWriteOpInit2(poolId, oid);
 	if (*op == nullptr) {
 	    ProxyDbgLogErr("Create Write Op failed.");
@@ -278,6 +338,10 @@ void CephProxyWriteOpSetAllocHint(ceph_proxy_op_t op, uint64_t expectedObjSize,
 
 int CephProxyReadOpInit2(ceph_proxy_op_t *op, const int64_t poolId, const char* oid)
 {
+	if (op == nullptr || oid == nullptr) {
+		ProxyDbgLogErr("op %p or oid %p is invalid", op, oid);
+		return -EINVAL;
+	}
 	*op = RadosReadOpInit2(poolId, oid);
 	if (*op == nullptr) {
 		ProxyDbgLogErr("Create Read Op failed.");

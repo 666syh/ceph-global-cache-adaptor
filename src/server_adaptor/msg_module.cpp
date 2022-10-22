@@ -36,11 +36,12 @@ static void decode_str_str_map_to_bl(bufferlist::const_iterator &p, bufferlist *
     start.copy(len, *out);
 }
 
-int MsgModule::ConvertClientopToOpreq(OSDOp &clientop, OpRequestOps &oneOp, OptionsType &optionType, OptionsLength &optionLength)
+int MsgModule::ConvertClientopToOpreq(OSDOp &clientop, OpRequestOps &oneOp, OptionsType &optionType,
+    OptionsLength &optionLength, long tid)
 {
     int ret = 0;
     oneOp.opSubType = clientop.op.op;
-    Salog(LV_DEBUG, LOG_TYPE, "ConvertClientopToOpreq CEPH_OSD_OP 0x%lX", oneOp.opSubType);
+    SaDatalog("Converting Clientop tid=%ld obj=%s type=0x%lX", tid, oneOp.objName.c_str(), oneOp.opSubType);
     switch (oneOp.opSubType) {
         case CEPH_OSD_OP_SPARSE_READ:
         case CEPH_OSD_OP_SYNC_READ:
@@ -49,8 +50,8 @@ int MsgModule::ConvertClientopToOpreq(OSDOp &clientop, OpRequestOps &oneOp, Opti
             optionLength.read += clientop.op.extent.length / 1024;
             oneOp.objOffset = clientop.op.extent.offset;
             oneOp.objLength = clientop.op.extent.length;
-            Salog(LV_DEBUG, LOG_TYPE, "ConvertClientopToOpreq READ obj=%s type=0x%lX offset=0x%X length=0x%X",
-            oneOp.objName.c_str(), oneOp.opSubType, oneOp.objOffset, oneOp.objLength);
+            SaDatalog("Converting READ tid=%ld obj=%s offset=%u length=%u",
+                tid, oneOp.objName.c_str(), oneOp.objOffset, oneOp.objLength);
             ConvertObjRw(clientop, oneOp);
     	} break;
         case CEPH_OSD_OP_WRITEFULL:
@@ -59,9 +60,8 @@ int MsgModule::ConvertClientopToOpreq(OSDOp &clientop, OpRequestOps &oneOp, Opti
             optionLength.write += clientop.op.extent.length / 1024;		
             oneOp.objOffset = clientop.op.extent.offset;
             oneOp.objLength = clientop.op.extent.length;
-            Salog(LV_DEBUG, LOG_TYPE, 
-		"ConvertClientopToOpreq WRITE/CEPH_OSD_OP_WRITEFULL obj=%s type=0x%lX offset=0x%X length=0x%X",
-                oneOp.objName.c_str(), oneOp.opSubType, oneOp.objOffset, oneOp.objLength);
+            SaDatalog("Converting WRITE/CEPH_OSD_OP_WRITEFULL tid=%ld obj=%s offset=%u length=%u",
+                tid, oneOp.objName.c_str(), oneOp.objOffset, oneOp.objLength);
             ConvertObjRw(clientop, oneOp);
         } break;
         case CEPH_OSD_OP_GETXATTR:
@@ -133,9 +133,12 @@ int MsgModule::ConvertClientopToOpreq(OSDOp &clientop, OpRequestOps &oneOp, Opti
             }
             if (cname.compare("rbd") == 0 && mname.compare("copyup") == 0) {
                 ret = 1;
+                SaDatalog("Converting COPYUP tid=%ld obj=%s", tid, oneOp.objName.c_str());
             } 
         } break;
-        case CEPH_OSD_OP_LIST_SNAPS:
+        case CEPH_OSD_OP_LIST_SNAPS: {
+            SaDatalog("Converting COPYUP tid=%ld obj=%s", tid, oneOp.objName.c_str());
+        }
             break;
         case CEPH_OSD_OP_CREATE:
             oneOp.opFlags = clientop.op.flags;

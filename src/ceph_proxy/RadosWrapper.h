@@ -28,7 +28,7 @@ int RadosGetMinAllocSizeHDD(rados_client_t client, uint32_t *minAllocSize);
 int RadosGetMinAllocSizeSSD(rados_client_t client, uint32_t *minAllocSize);
 int RadosGetClusterStat(rados_client_t client, CephClusterStat *stat);
 int RadosGetPoolStat(rados_client_t client, rados_ioctx_t ctx, CephPoolStat *stat);
-
+int RadosGetPoolsStat(rados_client_t client, CephPoolStat *stat, uint64_t *poolId, uint32_t poolNum);
 
 
 rados_op_t RadosWriteOpInit(const string& pool, const string &oid);

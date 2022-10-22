@@ -35,6 +35,8 @@ public :
 	const std::string &format);
     void WriteLogLimit2(const int logLevel, const std::string &fileName, const int fLine, const std::string &funcName,
         const std::string &format);
+    void WriteDataLog(const std::string &fileName, const int fLine, const std::string &funcName,
+        const std::string &format);
 
     void SetConfPath(const std::string &path);
     std::string GetConfPath();
@@ -45,6 +47,10 @@ public :
     void FtdsEndHigt(unsigned int id, const char *idName, uint64_t &ts, int ret);
 
     void GetWriteQuota(unsigned int poolId, SaWcacheQosInfo &info);
+    uint64_t GetWriteOpThrottle();
+    uint64_t GetReadOpThrottle();
+    uint64_t GetWriteBWThrottle();
+    uint64_t GetReadBWThrottle();
 };
 
 #endif

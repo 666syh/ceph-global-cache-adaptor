@@ -35,11 +35,12 @@ using namespace librados;
 #define DEFAULT_SGL_PAGE 4096
 #define RADOS_CONNECT_RETRY 5
 #define CONNECT_WAIT_TIME 5
+#define PATH_MAX_LEN		128
 
 #define MIN_ALLOC_SIZE_NAME "bluestore_min_alloc_size"
 #define HDD_MIN_ALLOC_SIZE_NAME "bluestore_min_alloc_size_hdd"
 #define SSD_MIN_ALLOC_SIZE_NAME "bluestore_min_alloc_size_ssd"
-#define LOG_FILE_NAME        "log_file"
+#define AUTH_CLUSTER_REQUIRED   "auth_cluster_required"
 
 static void RadosBindCore(std::vector<uint32_t> coreId, uint64_t ii, uint32_t n)
 {
@@ -157,8 +158,9 @@ void RadosBindMsgrWorker(std::vector<uint32_t> coreId, pid_t pid)
 
 int RadosClientInit(rados_client_t *client,const std::string &cephConf)
 {
-	int ret =0;
+	int ret = 0;
 	uint32_t retryCount = 0;
+	std::string authCluster;
 	librados::Rados *rados = new(std::nothrow) Rados();
 	if (rados == nullptr) {
 		ProxyDbgLogErr("Allocate Memory failed.");
@@ -176,12 +178,26 @@ int RadosClientInit(rados_client_t *client,const std::string &cephConf)
 		goto client_init_out;
 	}
 
+	ret = rados->conf_get(AUTH_CLUSTER_REQUIRED, authCluster);
+	if (ret != 0) {
+		ProxyDbgLogErr("get ceph conf<%s> failed: %d", AUTH_CLUSTER_REQUIRED, ret);
+		goto client_init_out;
+	}
+	if (strcmp(authCluster.c_str(), "cephx") == 0) {
+		ret = rados->conf_set("keyring", ProxyGetCephKeyring());
+		if (ret != 0) {
+			ProxyDbgLogErr("set conf<keyring, %s> failed: %d", ProxyGetCephKeyring(), ret);
+			goto client_init_out;
+		}
+		ProxyDbgLogInfo("set config <keyring, %s> success.", ProxyGetCephKeyring());
+	}
+
 	ret = rados->conf_set(ProxyGetMonTimeOutOption(), str.c_str());
 	if (ret != 0) {
 		 ProxyDbgLogErr("set conf<%s, %s> failed: %d", ProxyGetMonTimeOutOption(), str.c_str(), ret);
 		 goto client_init_out;
 	}
-        ProxyDbgLogInfo("set config<%s, %s> success.", ProxyGetMonTimeOutOption(), str.c_str());
+    ProxyDbgLogInfo("set config<%s, %s> success.", ProxyGetMonTimeOutOption(), str.c_str());
 
 	str = std::to_string(ProxyGetOsdTimeOut());
 	ret = rados->conf_set(ProxyGetOsdTimeOutOption(), str.c_str());
@@ -189,14 +205,7 @@ int RadosClientInit(rados_client_t *client,const std::string &cephConf)
 		 ProxyDbgLogErr("set conf<%s, %s> failed: %d", ProxyGetOsdTimeOutOption(), str.c_str(), ret);
 		 goto client_init_out;
 	}
-        ProxyDbgLogInfo("set config<%s, %s> success.", ProxyGetOsdTimeOutOption(), str.c_str());
-
-	ret = rados->conf_set(LOG_FILE_NAME, ProxyGetLogPath());
-	if (ret != 0) {
-		 ProxyDbgLogErr("set log<%s, %s> failed: %d", LOG_FILE_NAME, ProxyGetLogPath(), ret);
-		 goto client_init_out;
-	}
-        ProxyDbgLogInfo("set config<%s, %s> success.", LOG_FILE_NAME, ProxyGetLogPath());
+    ProxyDbgLogInfo("set config<%s, %s> success.", ProxyGetOsdTimeOutOption(), str.c_str());
 
 	while (retryCount < RADOS_CONNECT_RETRY) {
 		ret = rados->connect();
@@ -387,6 +396,12 @@ int RadosGetPoolStat(rados_client_t client, rados_ioctx_t ctx, CephPoolStat *sta
 	librados::IoCtx *ioctx = reinterpret_cast<librados::IoCtx *>(ctx);
 	librados::Rados *rados = reinterpret_cast<librados::Rados *>(client);
 
+	if (ioctx == nullptr || rados == nullptr) {
+		ProxyDbgLogErr("ioctx %p or rados %p not valid", ioctx, rados);
+		PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_GETPOOL_STAT, ts, -EINVAL);
+		return -EINVAL;
+	}
+
 	std::string pool_name = ioctx->get_pool_name();
 	std::list<std::string> ls;
 	ls.push_back(pool_name);
@@ -394,7 +409,7 @@ int RadosGetPoolStat(rados_client_t client, rados_ioctx_t ctx, CephPoolStat *sta
 	std::map<std::string,pool_stat_t> rawresult;
 	int ret =rados->get_pool_stats(ls,rawresult);
 	if (ret !=0) {
-		ProxyDbgLogErr("get pool stat failed: %d", ret);;
+		ProxyDbgLogErr("get pool stat failed: %d", ret);
 		return ret;
 	}
 
@@ -417,6 +432,41 @@ int RadosGetPoolStat(rados_client_t client, rados_ioctx_t ctx, CephPoolStat *sta
 	stat->compressedBytes = stats.compressed_bytes;
 	stat->compressedBytesAlloc = stats.compressed_bytes_alloc;
 
+	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_GETPOOL_STAT, ts, ret);
+	return 0;
+}
+
+int RadosGetPoolsStat(rados_client_t client, CephPoolStat *stat, uint64_t *poolId, uint32_t poolNum)
+{
+	uint64_t ts = 0;
+	PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_GETPOOL_STAT, ts);
+	librados::Rados *rados = reinterpret_cast<librados::Rados *>(client);
+	std::list<std::string> ls;
+	std::map<uint64_t, std::string> poolMap;
+	for (uint32_t i = 0; i < poolNum; i++) {
+		std::string poolName;
+		int ret = rados->pool_reverse_lookup(poolId[i], &poolName);
+		if (ret < 0) {
+			ProxyDbgLogErr("lookup poolName  poolId: %d, ret: %d  failed", poolId[i], ret);
+			stat[i].numBytes = -1;
+			continue;
+		}
+		ProxyDbgLogInfo("poolId %d, poolName %s", poolId[i], poolName.c_str());
+		ls.push_back(poolName);
+		poolMap[i] = poolName;
+	}
+
+	std::map<std::string, pool_stat_t> rawresult;
+	int ret = rados->get_pool_stats(ls, rawresult);
+	if (ret != 0) {
+		ProxyDbgLogErr("get pool stat failed: %d", ret);
+		return ret;
+	}
+
+	for (auto iter : poolMap) {
+		stat[iter.first].numKb = rawresult[iter.second].num_kb;
+		stat[iter.first].numBytes = rawresult[iter.second].num_bytes;
+	}
 	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_GETPOOL_STAT, ts, ret);
 	return 0;
 }
@@ -463,6 +513,10 @@ void RadosWriteOpRelease(rados_op_t op)
 void RadosWriteOpSetFlags(rados_op_t op, int flags)
 {
 	RadosObjectWriteOp *writeOp = reinterpret_cast<RadosObjectWriteOp *>(op);
+	if (writeOp == nullptr) {
+		ProxyDbgLogErr("writeOp %p is invalid", writeOp);
+		return;
+	}
 	writeOp->op.set_op_flags2(flags);
 }
 
@@ -533,6 +587,11 @@ void RadosWriteOpWrite(rados_op_t op, const char *buffer, size_t len, uint64_t o
 	int32_t ret = 0;
 	PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_OPINIT_WRITE, ts);
 	RadosObjectWriteOp *writeOp = reinterpret_cast<RadosObjectWriteOp *>(op);
+	if (writeOp == nullptr || buffer == nullptr) {
+		ProxyDbgLogErr("writeOp %p or buffer %p is invalid", writeOp, buffer);
+		PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_OPINIT_WRITE, ts, ret);
+		return;
+	}
 	writeOp->bl.append(buffer, len);	
 	writeOp->op.write(off, writeOp->bl);
 	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_OPINIT_WRITE, ts, ret);
@@ -544,6 +603,11 @@ void RadosWriteOpWriteSGL(rados_op_t op, SGL_S *sgl, size_t len1, uint64_t off, 
 	int32_t ret = 0;
 	PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_OPINIT_WRITESGL, ts);
 	RadosObjectWriteOp *writeOp = reinterpret_cast<RadosObjectWriteOp *>(op);
+	if (writeOp == nullptr) {
+		ProxyDbgLogErr("writeOp %p is invalid", writeOp);
+		PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_OPINIT_WRITESGL, ts, ret);
+		return;
+	}
 	uint32_t leftLen = len1;
 	uint32_t curSrcEntryIndex = 0;
 
@@ -709,6 +773,11 @@ void RadosWriteOpRemove(rados_op_t op)
 	int32_t ret = 0;
 	PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_OPINIT_REMOVE, ts);
 	RadosObjectWriteOp *writeOp = reinterpret_cast<RadosObjectWriteOp *>(op);
+	if (writeOp == nullptr) {
+		ProxyDbgLogErr("writeOp %p is invalid", writeOp);
+		PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_OPINIT_REMOVE, ts, ret);
+		return;
+	}
 	writeOp->op.remove();
 	writeOp->isRemove = true;
 	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_OPINIT_REMOVE, ts, ret);
@@ -1001,6 +1070,11 @@ void RadosReadOpStat(rados_op_t op, uint64_t *psize, time_t *pmtime, int *prval)
 	int32_t ret = 0;
 	PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_OPINIT_READSTAT, ts);
     RadosObjectReadOp *readOp = reinterpret_cast<RadosObjectReadOp *>(op);
+	if (readOp == nullptr) {
+		ProxyDbgLogErr("readOp %p is invalid", readOp);
+		PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_OPINIT_READSTAT, ts, ret);
+		return;
+	}
     readOp->op.stat(psize, pmtime, prval);
 	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_OPINIT_READSTAT, ts, ret);
 }
@@ -1012,12 +1086,17 @@ void RadosReadOpRead(rados_op_t op, uint64_t offset, size_t len, char *buffer,
 	int32_t ret = 0;
 	PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_OPINIT_READ, ts);
     RadosObjectReadOp *readOp = reinterpret_cast<RadosObjectReadOp *>(op);
+	if (readOp == nullptr || buffer == nullptr || bytesRead == nullptr) {
+		ProxyDbgLogErr("readOp %p or buffer %p or bytesRead %p or prval %p is invalid",
+			readOp, buffer, bytesRead, prval);
+		PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_OPINIT_READ, ts, ret);
+		return;
+	}
     readOp->reqCtx.read.buffer = buffer;
     readOp->reqCtx.read.bytesRead = bytesRead;
 
     readOp->op.read(offset, len, &(readOp->results), prval);
 	PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_OPINIT_READ, ts, ret);
-
 }
 
 void RadosReadOpReadSGL(rados_op_t op, uint64_t offset,size_t len, SGL_S *sgl, int *prval, int isRelease)
@@ -1026,6 +1105,11 @@ void RadosReadOpReadSGL(rados_op_t op, uint64_t offset,size_t len, SGL_S *sgl, i
 	int32_t ret = 0;
 	PROXY_FTDS_START_HIGH(PROXY_FTDS_OPS_OPINIT_READSGL, ts);
     RadosObjectReadOp *readOp = reinterpret_cast<RadosObjectReadOp *>(op);
+	if (readOp == nullptr) {
+		ProxyDbgLogErr("readOp %p is invalid", readOp);
+		PROXY_FTDS_END_HIGH(PROXY_FTDS_OPS_OPINIT_READSGL, ts, ret);
+		return;
+	}
     readOp->reqCtx.readSgl.sgl = sgl;
     readOp->reqCtx.readSgl.len = len;
     readOp->reqCtx.readSgl.buildType = isRelease;
@@ -1253,21 +1337,60 @@ int RadosOperationAioOperate( rados_client_t client, rados_op_t op, rados_ioctx_
 extern "C" {
 #endif
 
-bool ceph_status()
+int GetCfgItemCstr(char *dest, size_t destSize, const char *unit, const char *key);
+
+static int proxyConfigSet(rados_t *cluster)
+{
+	int ret = 0;
+	char cephConfPath[PATH_MAX_LEN] = { '\0' };
+	char keyRingPath[PATH_MAX_LEN] = { '\0' };
+	char authCluster[PATH_MAX_LEN] = { '\0' };
+
+	ret = GetCfgItemCstr(cephConfPath, PATH_MAX_LEN, "proxy", "ceph_conf_path");
+	if (ret != 0) {
+		syslog(LOG_ERR, "Failed to read the proxy conf ceph_conf_path.\n");
+		return ret;
+	}
+
+	ret = GetCfgItemCstr(keyRingPath, PATH_MAX_LEN, "proxy", "ceph_keyring_path");
+	if (ret != 0) {
+		syslog(LOG_ERR, "Failed to read the proxy conf ceph_keyring_path.\n");
+		return ret;
+	}
+
+	ret = rados_conf_read_file(*cluster, cephConfPath);
+	if (ret != 0) {
+		syslog(LOG_ERR, "Failed to read the ceph configuration file. ret=%d\n", ret);
+		return ret;
+	}
+
+	ret = rados_conf_get(*cluster, AUTH_CLUSTER_REQUIRED, authCluster, PATH_MAX_LEN);
+	if (ret != 0) {
+		syslog(LOG_ERR, "Failed to get %s. ret=%d\n", AUTH_CLUSTER_REQUIRED, ret);
+		return ret;
+	}
+	rados_conf_set(*cluster, "client_mount_timeout", "0.9");
+	rados_conf_set(*cluster, "rados_mon_op_timeout", "0.9");
+
+	if (strcmp(authCluster, "cephx") == 0) {
+		rados_conf_set(*cluster, "keyring", keyRingPath);
+	}
+
+	return 0;
+}
+
+PROXY_API_PUBLIC bool ceph_status()
 {
 	int ret = 0;
 
 	rados_t cluster;
 	rados_create(&cluster, "admin");
 
-	ret = rados_conf_read_file(cluster, "/etc/ceph/ceph.conf");
-	if (ret < 0) {
-		syslog(LOG_ERR, "Failed to read the ceph configuration file.\n");
+	ret = proxyConfigSet(&cluster);
+	if (ret != 0) {
+		syslog(LOG_ERR, "proxy ceph config set failed, ret = %d.\n", ret);
 		return false;
 	}
-
-	rados_conf_set(cluster, "client_mount_timeout", "0.9");
-	rados_conf_set(cluster, "rados_mon_op_timeout", "0.9");
 
 	ret = rados_connect(cluster);
 	if (ret != 0) {

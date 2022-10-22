@@ -36,7 +36,7 @@ int32_t ProxyConfigInit();
 char *ProxyGetZkServerList();
 char *ProxyGetCoreNumber();
 char *ProxyGetCephConf();
-char *ProxyGetLogPath();
+char *ProxyGetCephKeyring();
 uint32_t ProxyGetWorkerNum();
 uint32_t ProxyGetMsgrAmount();
 uint32_t ProxyGetBindCore();

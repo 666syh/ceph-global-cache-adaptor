@@ -27,7 +27,8 @@ public:
     MsgModule() {}
     ~MsgModule() {}
 
-    int ConvertClientopToOpreq(OSDOp &clientop, OpRequestOps &oneOp, OptionsType &optionType, OptionsLength &optionLength);
+    int ConvertClientopToOpreq(OSDOp &clientop, OpRequestOps &oneOp,
+        OptionsType &optionType, OptionsLength &optionLength, long tid);
 };
 
 #endif

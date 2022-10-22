@@ -313,22 +313,25 @@ public:
    }
 
     int32_t Queue(ceph_proxy_op_t op, completion_t c) {
-	RadosObjectOperation *operation = reinterpret_cast<RadosObjectOperation *>(op);
-	if (operation->poolId < 0) {
-	    ProxyDbgLogErr("invalid poolId: %ld", operation->poolId);
-	    return -1;
-	}
+		RadosObjectOperation *operation = reinterpret_cast<RadosObjectOperation *>(op);
+		if (operation == nullptr || c == nullptr) {
+			ProxyDbgLogErr("operation %p or c %p is invalid", operation, c);
+		}
+		if (operation->poolId < 0) {
+			ProxyDbgLogErr("invalid poolId: %ld", operation->poolId);
+			return -1;
+		}
 
-	RadosIOWorker *radosIOWorker = GetIOWorker(operation->poolId);
-	if (radosIOWorker == nullptr) {
-	    radosIOWorker = CreateIOWorker(operation->poolId);
-	    if (radosIOWorker == nullptr) {
-		ProxyDbgLogErr("CreateIOWorker Failed.");
-		return -1;
-	    }
-	}
+		RadosIOWorker *radosIOWorker = GetIOWorker(operation->poolId);
+		if (radosIOWorker == nullptr) {
+			radosIOWorker = CreateIOWorker(operation->poolId);
+			if (radosIOWorker == nullptr) {
+			ProxyDbgLogErr("CreateIOWorker Failed.");
+			return -1;
+			}
+		}
 
-	return radosIOWorker->Queue(op, c);
+		return radosIOWorker->Queue(op, c);
     }
 };
 

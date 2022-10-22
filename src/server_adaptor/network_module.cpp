@@ -35,6 +35,8 @@ using std::chrono::milliseconds;
 namespace {
 const string LOG_TYPE = "NETWORK";
 const char *SA_THREAD_NAME = "gc_sa";
+const int NUM_3 = 3;
+const int NUM_32 = 32;
 #ifdef SA_PERF
 MsgPerfRecord *g_msgPerf { nullptr };
 #endif
@@ -458,7 +460,7 @@ void NetworkModule::OpHandlerThread(int threadNum, int coreId)
     while (!finishThread[threadId]) {
         if (!opDispatch->Empty()) {
             opDispatch->reqQueue.swap(dealQueue);
-            Salog(LV_DEBUG, LOG_TYPE, "queue_size_swaped %d", dealQueue.size());
+            SaDatalog("queue_size_swaped %d", dealQueue.size());
             opDispatch->tsQueue.swap(dealTs);
             opDispatch->period.swap(periodTs);
             opDispatch->cond.notify_all();
@@ -507,7 +509,7 @@ void NetworkModule::OpHandlerThread(int threadNum, int coreId)
                     usleep(20 * SA_THOUSAND_DEC);
                 }
                 if (unlikely(opreq->exitsCopyUp == 1)) {
-                    Salog(LV_DEBUG, LOG_TYPE, "exists copyup, set copyupFlag, tid=%ld", opreq->tid);
+                    SaDatalog("exists copyup, set copyupFlag, tid=%ld", opreq->tid);
                     copyupFlag = 1;
                     opreq->copyupFlag = &copyupFlag;
                 }
@@ -563,76 +565,95 @@ int NetworkModule::ProcessOpReq(std::queue<MOSDOp *> &dealQueue, std::queue<uint
         MOSDOp *op = dealQueue.front();
         dealQueue.pop();
 
-        Salog(LV_DEBUG, LOG_TYPE, "ready opreq op.tid=%ld", op->get_tid());
-
 		uint64_t pts = periodTs.front();
 		periodTs.pop();
 		sa->FtdsEndHigt(SA_FTDS_QUEUE_PERIOD, "SA_FTDS_QUEUE_PERIOD", pts, 0);
 		uint64_t transTs = 0;
 		sa->FtdsStartHigh(SA_FTDS_TRANS_OPREQ, "SA_FTDS_TRANS_OPREQ", transTs);
-                opreq->opType = OBJECT_OP;
-                opreq->tid = op->get_tid();
-                opreq->snapId = op->get_snapid();
-                opreq->poolId = op->get_pg().pool() & 0xFFFFFFFFULL;
-                opreq->ptVersion = op->get_pg().pool() >> 32;
-                opreq->opsSequence = op->get_header().seq;
-                opreq->ptrMosdop = op;
-                opreq->ptId = op->get_pg().m_seed;
-
-                vector<char *>vecObj;
-                const char *delim = ".";
-                std::unique_ptr<char[]> tmp = std::make_unique<char[]>(op->get_oid().name.size() + 1);
-                strcpy(tmp.get(), op->get_oid().name.c_str());
-                char *p;
-                char *savep;
-                p = strtok_r(tmp.get(), delim, &savep);
-                while (p) {
-                    vecObj.push_back(p);
-                    p = strtok_r(nullptr, delim, &savep);
-                }
-                bool isRbd = false;
-                if (vecObj.empty() == false && strcmp(vecObj[0], "rbd_data") == 0) {
-                    if (vecObj.size() >= 3) {
-                        isRbd = true;
-                    } else {
-                        Salog(LV_CRITICAL, LOG_TYPE, "rbd_obj_id is %s, %d sections, this op return -EINVAL",
-                           op->get_oid().name.c_str(), vecObj.size());
-                        FinishCacheOps(op, opreq->optionType, opreq->optionLength, -EINVAL);
-                        return 1;
-                    }
-                }
-		OptionsType optionType = { 0 };
-        OptionsLength optionLength = { 0 };
-                for (auto &i : op->ops) {
-                    OpRequestOps oneOp;
-                    oneOp.objName = op->get_oid().name;
-                    if (isRbd) {
-                        oneOp.isRbd = isRbd;
-                        oneOp.rbdObjId.head = strtoul(vecObj[vecObj.size() - 2], 0, 16);
-                        oneOp.rbdObjId.sequence = strtoul(vecObj[vecObj.size() - 1], 0, 16);
-                    }
-                    int exists_copy_up = GetMsgModule()->ConvertClientopToOpreq(i, oneOp, optionType, optionLength);
-                    if (unlikely(exists_copy_up == 1)) {
-                        Salog(LV_DEBUG, LOG_TYPE, "exists copy_up %ld", opreq->tid);
-                        opreq->exitsCopyUp = 1;
-                    }
-                    opreq->vecOps.push_back(oneOp);
-                    Salog(LV_DEBUG, LOG_TYPE, "isRbd=%d obj_name=%s head=%ld sequence=%ld ptid=%d", isRbd,
-                        op->get_oid().name.c_str(), oneOp.rbdObjId.head, oneOp.rbdObjId.sequence, opreq->ptId);
-                }
-
-		if (optionType.write == 0) {
-			opreq->optionType = GCACHE_READ;
-            opreq->optionLength = optionLength.read;
-		} else {
-			opreq->optionType = GCACHE_WRITE;
-            opreq->optionLength = optionLength.write;
-		}
-
-		opreq->snapSeq = op->get_snap_seq();
+        opreq->opType = OBJECT_OP;
+        opreq->tid = op->get_tid();
+        opreq->snapId = op->get_snapid();
+        opreq->poolId = op->get_pg().pool() & 0xFFFFFFFFULL;
+        opreq->ptVersion = op->get_pg().pool() >> 32;
+        opreq->opsSequence = op->get_header().seq;
+        opreq->ptrMosdop = op;
+        opreq->ptId = op->get_pg().m_seed;
+        opreq->snapSeq = op->get_snap_seq();
         for (auto &i : op->get_snaps()) {
             opreq->snaps.push_back(i.val);
         }
+
+        SaDatalog("converted opreq :tid=%ld obj=%s poolId=%lu snapId=%lu snapSeq=%lu ptId=%u",
+            opreq->tid, op->get_oid().name.c_str(), opreq->poolId, opreq->snapId, opreq->snapSeq, opreq->ptId);
+
+        vector<char *>vecObj;
+        const char *delim = ".";
+        std::unique_ptr<char[]> tmp = std::make_unique<char[]>(op->get_oid().name.size() + 1);
+        strcpy(tmp.get(), op->get_oid().name.c_str());
+        char *p;
+        char *savep;
+        p = strtok_r(tmp.get(), delim, &savep);
+        while (p) {
+            vecObj.push_back(p);
+            p = strtok_r(nullptr, delim, &savep);
+        }
+        bool isRbd = false;
+        if (vecObj.empty() == false && strcmp(vecObj[0], "rbd_data") == 0) {
+            if (vecObj.size() >= 3) {
+                isRbd = true;
+            } else {
+                Salog(LV_CRITICAL, LOG_TYPE, "rbd_obj_id is %s, %d sections, this op return -EINVAL",
+                    op->get_oid().name.c_str(), vecObj.size());
+                FinishCacheOps(op, opreq->optionType, opreq->optionLength, -EINVAL);
+                return 1;
+            }
+        }
+		OptionsType optionType = { 0 };
+        OptionsLength optionLength = { 0 };
+        string imageId = "1";
+        if (isRbd) {
+            imageId.append(vecObj[vecObj.size() - 2]);
+        }
+        for (auto &i : op->ops) {
+            OpRequestOps oneOp;
+            oneOp.objName = op->get_oid().name.c_str();
+            if (isRbd) {
+                oneOp.isRbd = isRbd;
+                oneOp.rbdObjId.head = strtoull(imageId.c_str(), 0, 16);
+                oneOp.rbdObjId.seq = strtoull(vecObj[vecObj.size() - 1], 0, 16);
+                oneOp.rbdObjId.version = SA_VERSION;
+                oneOp.rbdObjId.format = FORMAT_UNSPECIFY_MD_DATE_POOL;
+                oneOp.rbdObjId.poolId = 0;
+                oneOp.rbdObjId.reserve = 0;
+                if (vecObj.size() > NUM_3) {
+                    uint64_t poolId = strtoul(vecObj[vecObj.size() - NUM_3], 0, 10);
+                    if ((poolId >> NUM_32) > 0) {
+                        Salog(LV_ERROR, LOG_TYPE, "poolId %ld overflow", poolId);
+                        return -1;
+                    }
+                    oneOp.rbdObjId.poolId = poolId;
+                    oneOp.rbdObjId.format = FORMAT_SPECIFY_MD_DATE_POOL;
+                }
+            }
+            int exists_copy_up = GetMsgModule()->ConvertClientopToOpreq(i, oneOp, optionType, optionLength, opreq->tid);
+            if (unlikely(exists_copy_up == 1)) {
+                opreq->exitsCopyUp = 1;
+            }
+            opreq->vecOps.push_back(oneOp);
+            SaDatalog("converted op :tid=%ld obj=%s head=%llu sequence=%llu isRbd=%d format=%u md_poolId=%u ptid=%d",
+                opreq->tid, op->get_oid().name.c_str(), oneOp.rbdObjId.head, oneOp.rbdObjId.seq,
+                isRbd, oneOp.rbdObjId.format, oneOp.rbdObjId.poolId, opreq->ptId);
+        }
+
+		if (optionType.write == 0) {
+            SaDatalog("converted optype :tid=%ld obj=%s => READ", opreq->tid, op->get_oid().name.c_str());
+			opreq->optionType = GCACHE_READ;
+            opreq->optionLength = optionLength.read;
+		} else {
+            SaDatalog("converted optype :tid=%ld obj=%s => WRITE", opreq->tid, op->get_oid().name.c_str());
+			opreq->optionType = GCACHE_WRITE;
+            opreq->optionLength = optionLength.write;
+		}
 
         sa->FtdsEndHigt(SA_FTDS_TRANS_OPREQ, "SA_FTDS_TRANS_OPREQ", transTs, 0);
         return 0;
@@ -650,7 +671,6 @@ uint32_t NetworkModule::EnqueueClientop(MOSDOp *opReq)
     uint64_t enqueTs = 0;
     sa->FtdsStartHigh(SA_FTDS_MOSDOP_ENQUEUE, "SA_FTDS_MOSDOP_ENQUEUE", enqueTs);
 
-    opReq->finish_decode();
     size_t idx = std::hash<std::string> {}(opReq->get_oid().name) % queueNum;
     std::unique_lock<std::mutex> opReqLock;
     try {
@@ -683,7 +703,8 @@ uint32_t NetworkModule::EnqueueClientop(MOSDOp *opReq)
     uint64_t periodTs = 0;
     sa->FtdsStartHigh(SA_FTDS_QUEUE_PERIOD, "SA_FTDS_QUEUE_PERIOD", periodTs);
     opDispatcher[idx]->EnQueue(opReq, ts, periodTs);
-    Salog(LV_DEBUG, LOG_TYPE, "MOSDOp is in the queue. tid=%ld vec_index=%ld", opReq->get_tid(), idx);
+    SaDatalog("MOSDOp is in the queue. tid=%ld obj=%s vec_index=%ld",
+        opReq->get_tid(), opReq->get_oid().name.c_str(), idx);
     sa->FtdsEndHigt(SA_FTDS_MOSDOP_ENQUEUE, "SA_FTDS_MOSDOP_ENQUEUE", enqueTs, 0);
 
     if (qosParam.limitWrite && ContainWriteOp(*opReq)) {
@@ -767,11 +788,11 @@ void NetworkModule::Getlwt(unsigned int c)
     if (unlikely((lwtCount % 500 == 0) && (lwtCount > 0))) {
         Salog(LV_INFORMATION, LOG_TYPE, "get lwtCount=%u", lwtCount);
     }
-    while (unlikely(lwtCount > (int64_t)qosParam.saOpThrottle)) {
-        getlwtLock.unlock();
-        SalogLimit(LV_INFORMATION, LOG_TYPE, "%d > %lu, sleep 10ms", lwtCount, qosParam.saOpThrottle);
-        usleep(10 * SA_THOUSAND_DEC);
+    while (unlikely(lwtCount > qosParam.saOpThrottle)) {
         getlwtLock.lock();
+        SalogLimit(LV_INFORMATION, LOG_TYPE, "%lu > %lu, sleep 10ms", lwtCount, qosParam.saOpThrottle);
+        usleep(10 * SA_THOUSAND_DEC);
+        getlwtLock.unlock();
     }
 }
 void NetworkModule::Putlwt()
@@ -782,7 +803,7 @@ void NetworkModule::Putlwt()
     std::unique_lock<std::mutex> putlwtLock = std::unique_lock<std::mutex>(lwtCountMtx);
     lwtCount--;
     if (unlikely((lwtCount % 500 == 0) && (lwtCount > 0))) {
-        Salog(LV_INFORMATION, LOG_TYPE, "put lwtCount=%u", lwtCount);
+        Salog(LV_INFORMATION, LOG_TYPE, "put lwtCount=%lu", lwtCount);
     }
 }
 void NetworkModule::GetlwtCas(unsigned int c)
@@ -790,15 +811,15 @@ void NetworkModule::GetlwtCas(unsigned int c)
     if (qosParam.saOpThrottle == 0) {
         return;
     }
-    int oldCount = lwtCount;
+    uint64_t oldCount = lwtCount;
     while (!__sync_bool_compare_and_swap(&lwtCount, oldCount, oldCount + c)) {
         oldCount = lwtCount;
     }
     if (unlikely((lwtCount % 500 == 0) && (lwtCount > 0))) {
-        Salog(LV_INFORMATION, LOG_TYPE, "get lwtCount=%u", oldCount);
+        SalogLimit(LV_INFORMATION, LOG_TYPE, "get lwtCount=%lu", oldCount);
     }
-    while (unlikely(oldCount > (int64_t)qosParam.saOpThrottle)) {
-        SalogLimit(LV_INFORMATION, LOG_TYPE, "%d > %lu, sleep 10ms", oldCount, qosParam.saOpThrottle);
+    while (unlikely(oldCount > qosParam.saOpThrottle)) {
+        Salog(LV_INFORMATION, LOG_TYPE, "%lu > %lu, sleep 10ms", oldCount, qosParam.saOpThrottle);
         usleep(10 * SA_THOUSAND_DEC);
         oldCount = lwtCount;
     }
@@ -808,135 +829,156 @@ void NetworkModule::PutlwtCas()
     if (qosParam.saOpThrottle == 0) {
         return;
     }
-    int oldCount = lwtCount;
+    uint64_t oldCount = lwtCount;
     while (!__sync_bool_compare_and_swap(&lwtCount, oldCount, oldCount - 1)) {
         oldCount = lwtCount;
     }
     if (unlikely((lwtCount % 500 == 0) && (lwtCount > 0))) {
-        Salog(LV_INFORMATION, LOG_TYPE, "put lwtCount=%u", oldCount);
+        Salog(LV_INFORMATION, LOG_TYPE, "put lwtCount=%lu", oldCount);
     }
 }
 void NetworkModule::GetWritelwt(unsigned int c)
 {
-    if (qosParam.writeOpThrottle == 0) {
+    SalogLimit(LV_INFORMATION, LOG_TYPE, "GetWriteOpThrottle:%lu.", sa->GetWriteOpThrottle());
+    if (sa->GetWriteOpThrottle() == 0) {
         return;
     }
     std::unique_lock<std::mutex> getlwtWriteLock = std::unique_lock<std::mutex>(lwtWriteCountMtx);
     lwtWriteCount += c;
     if (unlikely((lwtWriteCount % 500 == 0) && (lwtWriteCount > 0))) {
-        Salog(LV_INFORMATION, LOG_TYPE, "get lwtWriteCount=%u", lwtWriteCount);
+        Salog(LV_INFORMATION, LOG_TYPE, "get lwtWriteCount=%lu", lwtWriteCount);
     }
-    while (unlikely(lwtWriteCount > (int64_t)qosParam.writeOpThrottle)) {
-        getlwtWriteLock.unlock();
-        SalogLimit(LV_INFORMATION, LOG_TYPE, "%d > %lu, sleep 10ms", lwtWriteCount, qosParam.writeOpThrottle);
-        usleep(10 * SA_THOUSAND_DEC);
+    while (unlikely(lwtWriteCount > sa->GetWriteOpThrottle())) {
         getlwtWriteLock.lock();
+        SalogLimit(LV_INFORMATION, LOG_TYPE, "%lu > %lu, sleep 10ms", lwtWriteCount, sa->GetWriteOpThrottle());
+        usleep(10 * SA_THOUSAND_DEC);
+        getlwtWriteLock.unlock();
     }
 }
 void NetworkModule::PutWritelwt()
 {
-    if (qosParam.writeOpThrottle == 0) {
+    if (lwtWriteCount == 0) {
         return;
     }
     std::unique_lock<std::mutex> putlwtWriteLock = std::unique_lock<std::mutex>(lwtWriteCountMtx);
     lwtWriteCount--;
     if (unlikely((lwtWriteCount % 500 == 0) && (lwtWriteCount > 0))) {
-        Salog(LV_INFORMATION, LOG_TYPE, "put lwtWriteCount=%u", lwtWriteCount);
+        Salog(LV_INFORMATION, LOG_TYPE, "put lwtWriteCount=%lu", lwtWriteCount);
     }
 }
 void NetworkModule::GetWritelwtCas(unsigned int c)
 {
-    if (qosParam.writeOpThrottle == 0) {
-        return;
-    }
-    int oldWriteCount = lwtWriteCount;
+    uint64_t writeOpThrottle = sa->GetWriteOpThrottle();
+    SalogLimit(LV_INFORMATION, LOG_TYPE, "GetWriteOpThrottle:%lu.", writeOpThrottle);
+    uint64_t oldWriteCount = lwtWriteCount;
     while (!__sync_bool_compare_and_swap(&lwtWriteCount, oldWriteCount, oldWriteCount + c)) {
         oldWriteCount = lwtWriteCount;
     }
-    if (unlikely((lwtWriteCount % 500 == 0) && (lwtWriteCount > 0))) {
-        Salog(LV_INFORMATION, LOG_TYPE, "get lwtWriteCount=%u", oldWriteCount);
+    if (writeOpThrottle == 0) {
+        return;
     }
-    while (unlikely(oldWriteCount > (int64_t)qosParam.writeOpThrottle)) {
-        SalogLimit(LV_INFORMATION, LOG_TYPE, "%d > %lu, sleep 10ms", oldWriteCount, qosParam.writeOpThrottle);
+    if (unlikely((lwtWriteCount % 500 == 0) && (lwtWriteCount > 0))) {
+        SalogLimit(LV_INFORMATION, LOG_TYPE, "get lwtWriteCount=%lu", oldWriteCount);
+    }
+    while (unlikely(oldWriteCount > writeOpThrottle)) {
+        SalogLimit(LV_INFORMATION, LOG_TYPE, "%lu > %lu, sleep 10ms", oldWriteCount, writeOpThrottle);
         usleep(10 * SA_THOUSAND_DEC);
         oldWriteCount = lwtWriteCount;
+        writeOpThrottle = sa->GetWriteOpThrottle();
+        if (writeOpThrottle == 0) {
+            return;
+        }
     }
 }
 void NetworkModule::PutWritelwtCas()
 {
-    if (qosParam.writeOpThrottle == 0) {
+    if (lwtWriteCount == 0) {
         return;
     }
-    int oldWriteCount = lwtWriteCount;
+    uint64_t oldWriteCount = lwtWriteCount;
     while (!__sync_bool_compare_and_swap(&lwtWriteCount, oldWriteCount, oldWriteCount - 1)) {
+        if (lwtWriteCount == 0) {
+            return;
+        }
         oldWriteCount = lwtWriteCount;
     }
     if (unlikely((lwtWriteCount % 500 == 0) && (lwtWriteCount > 0))) {
-        Salog(LV_INFORMATION, LOG_TYPE, "put lwtWriteCount=%u", oldWriteCount);
+        SalogLimit(LV_INFORMATION, LOG_TYPE, "put lwtWriteCount=%lu", oldWriteCount);
     }
 }
 void NetworkModule::GetReadlwt(unsigned int c)
 {
-    if (qosParam.readOpThrottle == 0) {
+    SalogLimit(LV_INFORMATION, LOG_TYPE, "GetReadOpThrottle:%lu.", sa->GetReadOpThrottle());
+    if (sa->GetReadOpThrottle() == 0) {
         return;
     }
     std::unique_lock<std::mutex> getlwtReadLock = std::unique_lock<std::mutex>(lwtReadCountMtx);
     lwtReadCount += c;
     if (unlikely((lwtReadCount % 500 == 0) && (lwtReadCount > 0))) {
-        Salog(LV_INFORMATION, LOG_TYPE, "get lwtReadCount=%u", lwtReadCount);
+        Salog(LV_INFORMATION, LOG_TYPE, "get lwtReadCount=%lu", lwtReadCount);
     }
-    while (unlikely(lwtReadCount > (int64_t)qosParam.readOpThrottle)) {
-        getlwtReadLock.unlock();
-        SalogLimit(LV_INFORMATION, LOG_TYPE, "%d > %lu, sleep 10ms", lwtReadCount, qosParam.readOpThrottle);
-        usleep(10 * SA_THOUSAND_DEC);
+    while (unlikely(lwtReadCount > sa->GetReadOpThrottle())) {
         getlwtReadLock.lock();
+        SalogLimit(LV_INFORMATION, LOG_TYPE, "%lu > %lu, sleep 10ms", lwtReadCount, sa->GetReadOpThrottle());
+        usleep(10 * SA_THOUSAND_DEC);
+        getlwtReadLock.unlock();
     }
 }
 void NetworkModule::PutReadlwt()
 {
-    if (qosParam.readOpThrottle == 0) {
+    if (lwtReadCount == 0) {
         return;
     }
     std::unique_lock<std::mutex> putlwtReadLock = std::unique_lock<std::mutex>(lwtReadCountMtx);
     lwtReadCount--;
     if (unlikely((lwtReadCount % 500 == 0) && (lwtReadCount > 0))) {
-        Salog(LV_INFORMATION, LOG_TYPE, "put lwtReadCount=%u", lwtReadCount);
+        Salog(LV_INFORMATION, LOG_TYPE, "put lwtReadCount=%lu", lwtReadCount);
     }
 }
 void NetworkModule::GetReadlwtCas(unsigned int c)
 {
-    if (qosParam.readOpThrottle == 0) {
-        return;
-    }
-    int oldReadCount = lwtReadCount;
+    uint64_t readOpThrottle = sa->GetReadOpThrottle();
+    SalogLimit(LV_INFORMATION, LOG_TYPE, "GetReadOpThrottle:%lu.", readOpThrottle);
+    uint64_t oldReadCount = lwtReadCount;
     while (!__sync_bool_compare_and_swap(&lwtReadCount, oldReadCount, oldReadCount + c)) {
         oldReadCount = lwtReadCount;
     }
-    if (unlikely((lwtReadCount % 500 == 0) && (lwtReadCount > 0))) {
-        Salog(LV_INFORMATION, LOG_TYPE, "get lwtReadCount=%u", oldReadCount);
+    if (readOpThrottle == 0) {
+        return;
     }
-    while (unlikely(oldReadCount > (int64_t)qosParam.readOpThrottle)) {
-        SalogLimit(LV_INFORMATION, LOG_TYPE, "%d > %lu, sleep 10ms", oldReadCount, qosParam.readOpThrottle);
+    if (unlikely((lwtReadCount % 500 == 0) && (lwtReadCount > 0))) {
+        SalogLimit(LV_INFORMATION, LOG_TYPE, "get lwtReadCount=%lu", oldReadCount);
+    }
+    while (unlikely(oldReadCount > readOpThrottle)) {
+        SalogLimit(LV_INFORMATION, LOG_TYPE, "%lu > %lu, sleep 10ms", oldReadCount, readOpThrottle);
         usleep(10 * SA_THOUSAND_DEC);
         oldReadCount = lwtReadCount;
+        readOpThrottle = sa->GetReadOpThrottle();
+        if (readOpThrottle == 0) {
+            return;
+        }
     }
 }
 void NetworkModule::PutReadlwtCas()
 {
-    if (qosParam.readOpThrottle == 0) {
+    if (lwtReadCount == 0) {
         return;
     }
-    int oldReadCount = lwtReadCount;
+    uint64_t oldReadCount = lwtReadCount;
     while (!__sync_bool_compare_and_swap(&lwtReadCount, oldReadCount, oldReadCount - 1)) {
+        if (lwtReadCount == 0) {
+            return;
+        }
         oldReadCount = lwtReadCount;
     }
     if (unlikely((lwtReadCount % 500 == 0) && (lwtReadCount > 0))) {
-        Salog(LV_INFORMATION, LOG_TYPE, "put lwtReadCount=%u", oldReadCount);
+        SalogLimit(LV_INFORMATION, LOG_TYPE, "put lwtReadCount=%lu", oldReadCount);
     }
 }
 void NetworkModule::GetWriteBW(unsigned long int c)
 {
-    if (qosParam.writeBWThrottle == 0) {
+    SalogLimit(LV_INFORMATION, LOG_TYPE, "GetWriteBWThrottle:%lu.", sa->GetWriteBWThrottle());
+    if (sa->GetWriteBWThrottle() == 0) {
         return;
     }
     std::unique_lock<std::mutex> getWriteBWLock = std::unique_lock<std::mutex>(writeBWMtx);
@@ -944,16 +986,16 @@ void NetworkModule::GetWriteBW(unsigned long int c)
     if (unlikely((writeBW % 4096 == 0) && (writeBW > 0))) {
         Salog(LV_INFORMATION, LOG_TYPE, "get writeBW=%lu", writeBW);
     }
-    while (unlikely(writeBW > qosParam.writeBWThrottle)) {
-        getWriteBWLock.unlock();
-        SalogLimit(LV_INFORMATION, LOG_TYPE, "%lu > %lu, sleep 10ms", writeBW, qosParam.writeBWThrottle);
-        usleep(10 * SA_THOUSAND_DEC);
+    while (unlikely(writeBW > sa->GetWriteBWThrottle())) {
         getWriteBWLock.lock();
+        SalogLimit(LV_INFORMATION, LOG_TYPE, "%lu > %lu, sleep 10ms", writeBW, sa->GetWriteBWThrottle());
+        usleep(10 * SA_THOUSAND_DEC);
+        getWriteBWLock.unlock();
     }
 }
 void NetworkModule::PutWriteBW(unsigned long int c)
 {
-    if (qosParam.writeBWThrottle == 0) {
+    if (writeBW == 0) {
         return;
     }
     std::unique_lock<std::mutex> putWriteBWLock = std::unique_lock<std::mutex>(writeBWMtx);
@@ -964,38 +1006,48 @@ void NetworkModule::PutWriteBW(unsigned long int c)
 }
 void NetworkModule::GetWriteBWCas(unsigned long int c)
 {
-    if (qosParam.writeBWThrottle == 0) {
-        return;
-    }
+    uint64_t writeBWThrottle = sa->GetWriteBWThrottle();
+    SalogLimit(LV_INFORMATION, LOG_TYPE, "GetWriteBWThrottle:%lu.", writeBWThrottle);
     uint64_t oldWriteBW = writeBW;
     while (!__sync_bool_compare_and_swap(&writeBW, oldWriteBW, oldWriteBW + c)) {
         oldWriteBW = writeBW;
     }
-    if (unlikely((writeBW % 4096 == 0) && (writeBW > 0))) {
-        Salog(LV_INFORMATION, LOG_TYPE, "get writeBW=%lu", oldWriteBW);
+    if (writeBWThrottle == 0) {
+        return;
     }
-    while (unlikely(oldWriteBW > qosParam.writeBWThrottle)) {
-        SalogLimit(LV_INFORMATION, LOG_TYPE, "%lu > %lu, sleep 10ms", oldWriteBW, qosParam.writeBWThrottle);
+    if (unlikely((writeBW % 4096 == 0) && (writeBW > 0))) {
+        SalogLimit(LV_INFORMATION, LOG_TYPE, "get writeBW=%lu", oldWriteBW);
+    }
+    while (unlikely(oldWriteBW > writeBWThrottle)) {
+        SalogLimit(LV_INFORMATION, LOG_TYPE, "%lu > %lu, sleep 10ms", oldWriteBW, writeBWThrottle);
         usleep(10 * SA_THOUSAND_DEC);
         oldWriteBW = writeBW;
+        writeBWThrottle = sa->GetWriteBWThrottle();
+        if (writeBWThrottle == 0) {
+            return;
+        }
     }
 }
 void NetworkModule::PutWriteBWCas(unsigned long int c)
 {
-    if (qosParam.writeBWThrottle == 0) {
+    if (writeBW < c) {
         return;
     }
     uint64_t oldWriteBW = writeBW;
     while (!__sync_bool_compare_and_swap(&writeBW, oldWriteBW, oldWriteBW - c)) {
+        if (writeBW < c) {
+            return;
+        }
         oldWriteBW = writeBW;
     }
     if (unlikely((writeBW % 4096 == 0) && (writeBW > 0))) {
-        Salog(LV_INFORMATION, LOG_TYPE, "put writeBW=%lu", oldWriteBW);
+        SalogLimit(LV_INFORMATION, LOG_TYPE, "put writeBW=%lu", oldWriteBW);
     }
 }
 void NetworkModule::GetReadBW(unsigned long int c)
 {
-    if (qosParam.readBWThrottle == 0) {
+    SalogLimit(LV_INFORMATION, LOG_TYPE, "GetReadBWThrottle:%lu.", sa->GetReadBWThrottle());
+    if (sa->GetReadBWThrottle() == 0) {
         return;
     }
     std::unique_lock<std::mutex> getReadBWLock = std::unique_lock<std::mutex>(readBWMtx);
@@ -1003,16 +1055,16 @@ void NetworkModule::GetReadBW(unsigned long int c)
     if (unlikely((readBW % 4096 == 0) && (readBW > 0))) {
         Salog(LV_INFORMATION, LOG_TYPE, "get readBW=%lu", readBW);
     }
-    while (unlikely(readBW > qosParam.readBWThrottle)) {
-        getReadBWLock.unlock();
-        SalogLimit(LV_INFORMATION, LOG_TYPE, "%lu > %lu, sleep 10ms", readBW, qosParam.readBWThrottle);
-        usleep(10 * SA_THOUSAND_DEC);
+    while (unlikely(readBW > sa->GetReadBWThrottle())) {
         getReadBWLock.lock();
+        SalogLimit(LV_INFORMATION, LOG_TYPE, "%lu > %lu, sleep 10ms", readBW, sa->GetReadBWThrottle());
+        usleep(10 * SA_THOUSAND_DEC);
+        getReadBWLock.unlock();
     }
 }
 void NetworkModule::PutReadBW(unsigned long int c)
 {
-    if (qosParam.readBWThrottle == 0) {
+    if (readBW < c) {
         return;
     }
     std::unique_lock<std::mutex> putReadBWLock = std::unique_lock<std::mutex>(readBWMtx);
@@ -1023,39 +1075,52 @@ void NetworkModule::PutReadBW(unsigned long int c)
 }
 void NetworkModule::GetReadBWCas(unsigned long int c)
 {
-    if (qosParam.readBWThrottle == 0) {
-        return;
-    }
+    uint64_t readBWThrottle = sa->GetReadBWThrottle();
+    SalogLimit(LV_INFORMATION, LOG_TYPE, "GetReadBWThrottle:%lu.", readBWThrottle);
     uint64_t oldReadBW = readBW;
     while (!__sync_bool_compare_and_swap(&readBW, oldReadBW, oldReadBW + c)) {
         oldReadBW = readBW;
     }
-    if (unlikely((readBW % 4096 == 0) && (readBW > 0))) {
-        Salog(LV_INFORMATION, LOG_TYPE, "get readBW=%lu", oldReadBW);
+    if (readBWThrottle == 0) {
+        return;
     }
-    while (unlikely(oldReadBW > qosParam.readBWThrottle)) {
-        SalogLimit(LV_INFORMATION, LOG_TYPE, "%lu > %lu, sleep 10ms", oldReadBW, qosParam.readBWThrottle);
+    if (unlikely((readBW % 4096 == 0) && (readBW > 0))) {
+        SalogLimit(LV_INFORMATION, LOG_TYPE, "get readBW=%lu", oldReadBW);
+    }
+    while (unlikely(oldReadBW > readBWThrottle)) {
+        SalogLimit(LV_INFORMATION, LOG_TYPE, "%lu > %lu, sleep 10ms", oldReadBW, readBWThrottle);
         usleep(10 * SA_THOUSAND_DEC);
         oldReadBW = readBW;
+        readBWThrottle = sa->GetReadBWThrottle();
+        if (readBWThrottle == 0) {
+            return;
+        }
     }
 }
 void NetworkModule::PutReadBWCas(unsigned long int c)
 {
-    if (qosParam.readBWThrottle == 0) {
+    if (readBW < c) {
         return;
     }
     uint64_t oldReadBW = readBW;
     while (!__sync_bool_compare_and_swap(&readBW, oldReadBW, oldReadBW - c)) {
+        if (readBW < c) {
+            return;
+        }
         oldReadBW = readBW;
     }
     if (unlikely((readBW % 4096 == 0) && (readBW > 0))) {
-        Salog(LV_INFORMATION, LOG_TYPE, "put readBW=%lu", oldReadBW);
+        SalogLimit(LV_INFORMATION, LOG_TYPE, "put readBW=%lu", oldReadBW);
     }
 }
 
 void FinishCacheOps(void *op, uint32_t optionType, uint64_t optionLength, int32_t r)
 {
     MOSDOp *ptr = (MOSDOp *)(op);
+    if (ptr == nullptr) {
+        Salog(LV_ERROR, LOG_TYPE, " finish. but mosdop is null");
+        return;
+    }
     MOSDOpReply *reply = new MOSDOpReply(ptr, 0, 0, 0, false);
     reply->claim_op_out_data(ptr->ops);
     reply->set_result(r);
@@ -1086,31 +1151,46 @@ void FinishCacheOps(void *op, uint32_t optionType, uint64_t optionLength, int32_
 
 void SetOpResult(int i, int32_t ret, MOSDOp *op)
 {
+    if (op == nullptr) {
+        Salog(LV_ERROR, LOG_TYPE, " mosdop %p is null, skip", op);
+        return;
+    }
     op->ops[i].rval = ret;
 }
 
 void ProcessBuf(const char *buf, uint32_t len, int cnt, void *p)
 {
     MOSDOp *ptr = (MOSDOp *)(p);
+    if (ptr == nullptr) {
+        Salog(LV_ERROR, LOG_TYPE, " mosdop %p is null, skip", ptr);
+        return;
+    }
     encode(std::string_view(buf, len), ptr->ops[cnt].outdata);
 }
 
 void EncodeOmapGetkeys(const SaBatchKeys *batchKeys, int i, MOSDOp *mosdop)
 {
     bufferlist bl;
+    if (mosdop == nullptr || batchKeys == nullptr) {
+        Salog(LV_ERROR, LOG_TYPE, " mosdop %p or batchKeys %p is null, skip", mosdop, batchKeys);
+        return;
+    }
     for (uint32_t j = 0; j < batchKeys->nums; j++) {
         encode(std::string_view(batchKeys->keys[j].buf, batchKeys->keys[j].len), bl);
     }
     encode(batchKeys->nums, mosdop->ops[i].outdata);
     Salog(LV_DEBUG, LOG_TYPE, "CEPH_OSD_OP_OMAPGETKEYS get key num=%d", batchKeys->nums);
     mosdop->ops[i].outdata.claim_append(bl);
-    // TODO
     encode(false, mosdop->ops[i].outdata);
 }
 
 void EncodeOmapGetvals(const SaBatchKv *KVs, int i, MOSDOp *mosdop)
 {
     bufferlist bl;
+    if (mosdop == nullptr || KVs == nullptr) {
+        Salog(LV_ERROR, LOG_TYPE, " mosdop %p or KVs %p is null, skip", mosdop, KVs);
+        return;
+    }
     Salog(LV_DEBUG, LOG_TYPE, "CEPH_OSD_OP_OMAPGETVALS get key num=%d", KVs->kvNum);
     for (uint32_t j = 0; j < KVs->kvNum; j++) {
         if (KVs->keys[j].buf && KVs->keys[j].len) {
@@ -1130,6 +1210,10 @@ void EncodeOmapGetvals(const SaBatchKv *KVs, int i, MOSDOp *mosdop)
 void EncodeOmapGetvalsbykeys(const SaBatchKv *keyValue, int i, MOSDOp *mosdop)
 {
     map<string, bufferlist> out;
+    if (mosdop == nullptr || keyValue == nullptr) {
+        Salog(LV_ERROR, LOG_TYPE, " mosdop %p or keyValue %p is null, skip", mosdop, keyValue);
+        return;
+    }
     for (uint32_t j = 0; j < keyValue->kvNum; j++) {
         bufferlist value;
         string keys(keyValue->keys[j].buf, keyValue->keys[j].len);
@@ -1139,11 +1223,13 @@ void EncodeOmapGetvalsbykeys(const SaBatchKv *keyValue, int i, MOSDOp *mosdop)
     encode(out, mosdop->ops[i].outdata);
 }
 
-
-//
 void EncodeRead(uint64_t opType, unsigned int offset, unsigned int len, const char *buf, unsigned int bufLen, int i,
     MOSDOp *mosdop)
 {
+    if (mosdop == nullptr) {
+        Salog(LV_ERROR, LOG_TYPE, " mosdop %p is null, skip", mosdop);
+        return;
+    }
     if (unlikely(opType == CEPH_OSD_OP_SPARSE_READ)) {
         std::map<uint64_t, uint64_t> extents;
         extents[offset] = len;
@@ -1156,6 +1242,10 @@ void EncodeRead(uint64_t opType, unsigned int offset, unsigned int len, const ch
 
 void EncodeXattrGetXattr(const SaBatchKv *keyValue, int i, MOSDOp *mosdop)
 {
+    if (mosdop == nullptr || keyValue == nullptr) {
+        Salog(LV_ERROR, LOG_TYPE, " mosdop %p or keyValue %p is null, skip", mosdop, keyValue);
+        return;
+    }
     mosdop->ops[i].outdata.clear();
     for (uint32_t j = 0; j < keyValue->kvNum; j++) {
         bufferptr ptr(keyValue->values[j].buf, keyValue->values[j].len);
@@ -1165,6 +1255,10 @@ void EncodeXattrGetXattr(const SaBatchKv *keyValue, int i, MOSDOp *mosdop)
 
 void EncodeXattrGetXattrs(const SaBatchKv *keyValue, int i, MOSDOp *mosdop)
 {
+    if (mosdop == nullptr || keyValue == nullptr) {
+        Salog(LV_ERROR, LOG_TYPE, " mosdop %p or keyValue %p is null, skip", mosdop, keyValue);
+        return;
+    }
     map<string, bufferlist> out;
     bufferlist bl;
     for (uint32_t j = 0; j < keyValue->kvNum; j++) {
@@ -1179,12 +1273,20 @@ void EncodeXattrGetXattrs(const SaBatchKv *keyValue, int i, MOSDOp *mosdop)
 
 void EncodeGetOpstat(uint64_t psize, time_t ptime, int i, MOSDOp *mosdop)
 {
+    if (mosdop == nullptr) {
+        Salog(LV_ERROR, LOG_TYPE, " mosdop %p is null, skip", mosdop);
+        return;
+    }
     encode(psize, mosdop->ops[i].outdata);
     encode(ptime, mosdop->ops[i].outdata);
 }
 
 void EncodeListSnaps(const ObjSnaps *objSnaps, int i, MOSDOp *mosdop)
 {
+    if (mosdop == nullptr || objSnaps == nullptr) {
+        Salog(LV_ERROR, LOG_TYPE, " mosdop %p or objSnaps %p is null, skip", mosdop, objSnaps);
+        return;
+    }
     obj_list_snap_response_t resp;
     resp.seq = 0;
     if (objSnaps->cloneInfoNum >= 2) {

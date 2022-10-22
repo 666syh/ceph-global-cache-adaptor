@@ -1,6 +1,10 @@
 set(EXECUTABLE_OUTPUT_PATH${BASE_DIR}/build/bin)
+if (NOT DEFINED PROXY_ONLY)
 add_subdirectory(ceph_proxy)
 add_subdirectory(server_adaptor)
+else()
+add_subdirectory(ceph_proxy)
+endif()
 
 set(INSTALL_BASE_DIR "")
 set(INSTALL_INCLUDE_DIR include)

@@ -23,48 +23,13 @@
 #include <string.h>
 #include <sys/sysinfo.h>
 #include <salog.h>
-// #include "common.h"
+#include <iostream>
 
-#define CLUSTER_CONFIG_FILE "/home/config_sa.conf"
-#define CONFIG_BUFFSIZE 500
 #define CPU_NUM_64 (64)
 #define CPU_NUM_96 (96)
 #define CPU_NUM_128 (128)
 #define MAX_CPU_NUM (256)
 
-static const char *LOCAL_IPV4_ADDR = "local_ipv4_addr";
-static const char *LOCAL_PORT = "local_port";
-static const char *ZK_SERVER_LIST = "zk_server_list";
-static const char *IOD_CORE = "iod_core";
-static const char *XNET_CORE = "xnet_core";
-static const char *DPSHM_CORE = "dpshm_core";
-static const char *GVA_SLAB_OBJ_NUM = "gva_slab_obj_num";
-static const char *USE_ONE_SIDE_RMDA = "use_one_side_rdma";
-
-static const char *LISTEN_IP = "listen_ip";
-static const char *LISTEN_PORT = "listen_port";
-static const char *SEND_IP = "send_ip";
-static const char *SEND_PORT = "send_port";
-static const char *TEST_MODE = "test_mode";
-static const char *CORE_NUMBER_64 = "core_number_64";
-static const char* CORE_NUMBER_96 = "core_number_96";
-static const char* CORE_NUMBER_128 = "core_number_128";
-static const char* CORE_NUMBER_256 = "core_number_256";
-
-static const char *QUEUE_AMOUNT = "queue_amount";
-static const char *QUEUE_MAX_CAPACITY = "queue_max_capacity";
-static const char *MSGR_AMOUNT = "msgr_amount";
-static const char *BIND_CORE = "bind_core";
-static const char *BIND_QUEUE_CORE = "bind_queue_core";
-
-static const char *WRITE_QOS = "write_qos";
-static const char *GET_QUOTA_CYC = "get_quota_cyc";
-static const char *GET_MESSENGER_THROTTLE = "enable_messenger_throttle";
-static const char* SA_OP_THROTTLE = "sa_op_throttle";
-static const char* WRITE_OP_THROTTLE = "write_op_throttle";
-static const char* READ_OP_THROTTLE = "read_op_throttle";
-static const char* WRITE_BW_THROTTLE = "write_bw_throttle";
-static const char* READ_BW_THROTTLE = "read_bw_throttle";
 #ifndef RETURN_OK
 #define RETURN_OK 0
 #endif
@@ -74,223 +39,22 @@ static const char* READ_BW_THROTTLE = "read_bw_throttle";
 #endif
 
 typedef struct {
-	uint64_t ipv4Addr { 0 };
-	uint64_t port { 0 };
-	char ipv4AddrStr[MAX_IPV4_ADDR_LEN];
-	char zkServerList[ZK_SERVER_LIST_STR_LEN];
-
-	uint32_t iodCore[MAX_IOD_CORE];
-	uint32_t xnetCore[MAX_XNET_CORE];
-	uint32_t dpshmCore[MAX_DPSHM_CORE];
-
-	uint64_t gvaSlabObjNum { 0 };
-	uint64_t isUserOneSideRDMA { 0 };
-
 	char listenIp[MAX_IPV4_ADDR_LEN];
 	char listenPort[MAX_PORT_SIZE];
-	char sendIp[MAX_IPV4_ADDR_LEN];
-	char sendPort[MAX_PORT_SIZE];
-	char testMode[MAX_PORT_SIZE];
 	char coreNumber[MAX_PORT_SIZE];
 	uint64_t queueAmount { 0 };
 	uint64_t msgrAmount { 0 };
 	uint64_t bindCore { 0 };
 	uint64_t bindQueueCore { 0 };
-	uint64_t perf { 0 };
 	uint64_t queueMaxCapacity { 0 };
 
 	uint64_t writeOoS{0};
 	uint64_t getQuotaCyc{0};
 	uint64_t getMessengerThrottle {0};
 	uint64_t saOpThrottle{ 0 };
-	uint64_t writeOpThrottle{ 0 };
-	uint64_t readOpThrottle{ 0 };
-	uint64_t writeBWThrottle{ 0 };
-	uint64_t readBWThrottle{ 0 };
 } SA_ClusterControlCfg;
 
 SA_ClusterControlCfg g_SaClusterControlCfg = { 0 };
-
-static void InitClusterCfg()
-{
-	int32_t i;
-	for (i = 0; i < MAX_IOD_CORE; i++) {
-		g_SaClusterControlCfg.iodCore[i] = UINT32_MAX;
-	}
-
-	for (i = 0; i < MAX_XNET_CORE; i++) {
-		g_SaClusterControlCfg.xnetCore[i] = UINT32_MAX;
-	}
-
-	for (i =0; i < MAX_DPSHM_CORE; i++) {
-		g_SaClusterControlCfg.dpshmCore[i] = UINT32_MAX;
-	}
-
-	g_SaClusterControlCfg.isUserOneSideRDMA = false;
-}
-
-static int32_t ConfigReadByLine(FILE *fptemp, uint8_t *buf, int32_t readLine)
-{
-	uint8_t *pcret = NULL;
-	pcret = (uint8_t *)fgets((char *)buf, readLine, fptemp);
-	if (pcret == NULL) {
-		return RETURN_ERROR;
-	} else {
-		return RETURN_OK;
-	}
-}
-
-static uint8_t *SearchSubString(uint8_t *buf, const char *substr)
-{
-	uint8_t *pstrret = NULL;
-	if ((buf == NULL) || (substr == NULL)) {
-		return NULL;
-	}
-
-	pstrret = (uint8_t *)strstr((char *)buf, substr);
-	if (pstrret != NULL) {
-	    pstrret += strlen(substr);
-	    while (*pstrret == ' ' || *pstrret == '=') {
-		    pstrret++;
-	    }
-
-	    return pstrret;
-	}
-
-	return NULL;
-}
-
-static void ConfigTrim(uint8_t *str)
-{
-	int32_t istrLen = (int32_t)strlen((char *)str);
-	while (istrLen > 0) {
-		if ((str[istrLen - 1] == '\n') || (str[istrLen - 1] == ' ') || (str[istrLen - 1] == '\r')) {
-			str[istrLen - 1] = '\0';
-			istrLen--;
-		} else {
-			break;
-		}
-	}
-}
-
-static int32_t CheckIsOctal(uint8_t *ptemp)
-{
-	if ((*ptemp == '0') && (*(ptemp + 1) != 'x') && (*(ptemp + 1) != 'X') && (*(ptemp + 1) != '\0')) {
-		return RETURN_OK;
-	}
-
-	return RETURN_ERROR;
-}
-
-static int32_t StringToIntByOctal(uint8_t *ptemp, int64_t *intValue)
-{
-	while (*ptemp != '\0') {
-		if (*ptemp >= '0' && *ptemp <= '7') {
-			*intValue = 8 * (*intValue) + *ptemp - '0';
-			ptemp ++;
-		} else {
-			return RETURN_ERROR;
-		}
-	}
-
-	return RETURN_OK;
-}
-
-static int32_t CheckIsHexadecimal(uint8_t *ptemp)
-{
-	if (((*ptemp == '0') && (*(ptemp + 1) == 'x')) || ((*ptemp == '0') && (*(ptemp + 1) == 'X'))) {
-		return RETURN_OK;
-	}
-
-	return RETURN_ERROR;
-}
-
-static int32_t StringToIntByHexadecimal(uint8_t *ptemp, int64_t *intValue)
-{
-	while (*ptemp != '\0') {
-		if (*ptemp >= 'a' && *ptemp <= 'f') {
-			*intValue = 16 * (*intValue) + *ptemp - 'a' + 10;
-		} else if (*ptemp >= 'A' && *ptemp <= 'F') {
-			*intValue = 16 * (*intValue) + *ptemp - 'A' + 10;
-		} else if (*ptemp >= '0' && *ptemp <='9') {
-			*intValue = 16 * (*intValue) + *ptemp - '0';
-		} else {
-			return RETURN_ERROR;
-		}
-
-		ptemp++;
-	}
-
-	return RETURN_OK;
-}
-
-static int32_t StringToIntByDecimal(uint8_t *ptemp, int64_t *intValue)
-{
-	while (*ptemp != '\0') {
-		if (*ptemp >= '0' && *ptemp <= '9') {
-			*intValue = 10 * (*intValue) + *ptemp - '0';
-		} else {
-			return RETURN_ERROR;
-		}
-		ptemp++;
-	}
-
-	return RETURN_OK;
-}
-
-static int32_t TransformValueToInt(uint8_t *pvalue, uint64_t *resultValue)
-{
-	int64_t intValue = 0;
-	uint8_t *ptemp = pvalue;
-	int32_t ret;
-
-	if (pvalue == NULL) {
-		return RETURN_ERROR;
-	}
-
-	if (CheckIsOctal(ptemp) == RETURN_OK) {
-		ptemp++;
-		ret = StringToIntByOctal(ptemp, &intValue);
-		if (ret != RETURN_OK) {
-			return RETURN_ERROR;
-		}
-	} else if (CheckIsHexadecimal(ptemp) == RETURN_OK) {
-		ptemp = ptemp + 2;
-		if (*ptemp == '\0') {
-			return RETURN_ERROR;
-		}
-
-		ret = StringToIntByHexadecimal(ptemp, &intValue);
-		if (ret != RETURN_OK) {
-			return RETURN_ERROR;
-		}
-	} else {
-		ret = StringToIntByDecimal(ptemp, &intValue);
-		if (ret != RETURN_OK){
-			return RETURN_ERROR;
-		}
-	}
-	*resultValue = (uint64_t)intValue;
-	return RETURN_OK;
-}
-
-static int32_t ParseCoreConfig(char *str, uint32_t *cores, uint8_t maxCoreNum)
-{
-	char *ctx = NULL;
-	char *item = NULL;
-
-	int idx = 0;
-	for (item = strtok_r(str, ",",&ctx); item != NULL && idx < maxCoreNum; item = strtok_r(NULL, ",",&ctx), idx++) {
-		uint64_t coreid = UINT64_MAX;
-		TransformValueToInt((uint8_t *)item, &coreid);
-		if (coreid > UINT8_MAX) {
-			return RETURN_ERROR;
-		}
-		cores[idx] = coreid;
-	}
-	
-	return RETURN_OK;
-}
 
 //
 static int32_t GetSysCpuNum()
@@ -300,284 +64,93 @@ static int32_t GetSysCpuNum()
 	return cpuNum;
 }
 
-static int32_t CheckAndSetCoreNumber(uint8_t* str, bool* find)
+extern "C" {
+	int GetCfgItemCstr(char *dest, size_t destSize, const char *unit, const char *key);
+	int GetCfgItemInt32(int32_t *dest, const char *unit, const char *key);
+	int GetCfgItemUint32(uint32_t *dest, const char *unit, const char *key);
+	int GetCfgItemUint64(uint64_t *dest, const char *unit, const char *key);
+}
+static int32_t SetCfgCorenum()
 {
-	uint8_t* value;
-	int32_t cpuNum = GetSysCpuNum();
+	int cpuNum = GetSysCpuNum();
+	int keyCpuNum;
+	int ret = 0;
 
 	if (cpuNum < CPU_NUM_96) {
-		value = SearchSubString(str, CORE_NUMBER_64);
-	}
-	else if (cpuNum < CPU_NUM_128) {
-		value = SearchSubString(str, CORE_NUMBER_96);
-	}
-	else if (cpuNum < MAX_CPU_NUM) {
-		value = SearchSubString(str, CORE_NUMBER_128);
+		ret = GetCfgItemCstr(
+			g_SaClusterControlCfg.coreNumber, sizeof(g_SaClusterControlCfg.coreNumber), "sa", "core_number_64");
+		keyCpuNum = CPU_NUM_64;
+	} else if (cpuNum < CPU_NUM_128) {
+		ret = GetCfgItemCstr(
+			g_SaClusterControlCfg.coreNumber, sizeof(g_SaClusterControlCfg.coreNumber), "sa", "core_number_96");
+		keyCpuNum = CPU_NUM_96;
+	} else if (cpuNum < MAX_CPU_NUM) {
+		ret = GetCfgItemCstr(
+			g_SaClusterControlCfg.coreNumber, sizeof(g_SaClusterControlCfg.coreNumber), "sa", "core_number_128");
+		keyCpuNum = CPU_NUM_128;
 	} else {
-		value = SearchSubString(str, CORE_NUMBER_256);
+		ret = GetCfgItemCstr(
+			g_SaClusterControlCfg.coreNumber, sizeof(g_SaClusterControlCfg.coreNumber), "sa", "core_number_256");
+		keyCpuNum = MAX_CPU_NUM;
 	}
 
-	if(value != NULL) {
-		ConfigTrim(value);
-		if (strlen((char*)value) >= MAX_PORT_SIZE) {
-			Salog(LV_ERROR, LOG_TYPE, "Server adaptor core num(%d) over MAX_PORT_SIZE(%d) %d",
-				strlen((char*)value), MAX_PORT_SIZE);
-			return RETURN_ERROR;
-		}
-		strcpy(g_SaClusterControlCfg.coreNumber, (char*)value);
-		*find = true;
-	}
-	return RETURN_OK;
-}
-
-static int32_t AnalyzeSubString(uint8_t *str)
-{
-	uint8_t *value;
-
-	value = SearchSubString(str, LOCAL_IPV4_ADDR);
-	if (value != NULL) {
-		ConfigTrim(value);
-		strcpy(g_SaClusterControlCfg.ipv4AddrStr, (char *)value);
-
-		return RETURN_OK;
-	}
-
-	value = SearchSubString(str, LOCAL_PORT);
-	if (value != NULL) {
-		ConfigTrim(value);
-		return TransformValueToInt(value, &g_SaClusterControlCfg.port);
-	}
-
-	value = SearchSubString(str, ZK_SERVER_LIST);
-	if (value != NULL) {
-		ConfigTrim(value);
-		strcpy(g_SaClusterControlCfg.zkServerList, (char *)value);
-
-		return RETURN_OK;
-	}
-
-	value = SearchSubString(str, IOD_CORE);
-	if (value != NULL) {
-		ConfigTrim(value);
-		return ParseCoreConfig((char *)value, g_SaClusterControlCfg.iodCore, MAX_IOD_CORE);
-	}
-
-	value = SearchSubString(str, XNET_CORE);
-	if (value != NULL) {
-		ConfigTrim(value);
-                return ParseCoreConfig((char *)value, g_SaClusterControlCfg.xnetCore, MAX_XNET_CORE);
-	}
-
-	value = SearchSubString(str, DPSHM_CORE);
-	if (value != NULL) {
-		ConfigTrim(value);
-		return ParseCoreConfig((char *)value, g_SaClusterControlCfg.dpshmCore, MAX_DPSHM_CORE);
-	}
-	
-	value = SearchSubString(str, GVA_SLAB_OBJ_NUM);
-	if (value != NULL) {
-		ConfigTrim(value);
-		return TransformValueToInt(value, &g_SaClusterControlCfg.gvaSlabObjNum);
-	}
-
-	value = SearchSubString(str, USE_ONE_SIDE_RMDA);
-	if (value != NULL) {
-		ConfigTrim(value);
-		return TransformValueToInt(value, &g_SaClusterControlCfg.isUserOneSideRDMA);
-	}
-	value = SearchSubString(str, LISTEN_IP);
-	if (value != NULL) {
-		ConfigTrim(value);
-		if (strlen((char *)value) >= MAX_IPV4_ADDR_LEN) {
-			return RETURN_ERROR;
-		}
-		strcpy(g_SaClusterControlCfg.listenIp, (char *)value);
-		return RETURN_OK;
-	}
-	value = SearchSubString(str, LISTEN_PORT);
-	if (value != NULL) {
-		ConfigTrim(value);
-		if (strlen((char *)value) >= MAX_PORT_SIZE) {
-			return RETURN_ERROR;
-		}
-		strcpy(g_SaClusterControlCfg.listenPort, (char *)value);
-		return RETURN_OK;
-	}
-	value = SearchSubString(str, SEND_IP);
-	if (value != NULL) {
-		ConfigTrim(value);
-		if (strlen((char *)value) >= MAX_IPV4_ADDR_LEN) {
-			return RETURN_ERROR;
-		}
-		strcpy(g_SaClusterControlCfg.sendIp, (char *)value);
-		return RETURN_OK;
-	}
-	value = SearchSubString(str, SEND_PORT);
-	if (value != NULL) {
-		ConfigTrim(value);
-		if (strlen((char *)value) >= MAX_PORT_SIZE) {
-			return RETURN_ERROR;
-		}
-		strcpy(g_SaClusterControlCfg.sendPort, (char *)value);
-		return RETURN_OK;
-	}
-	value = SearchSubString(str, TEST_MODE);
-	if (value != NULL) {
-		ConfigTrim(value);
-		 if (strlen((char *)value) >= MAX_PORT_SIZE) {
-			 return RETURN_ERROR;
-		 }
-		 strcpy(g_SaClusterControlCfg.testMode, (char *)value);
-		 return RETURN_OK;
-	}       
-	bool find = false;
-	int ret = 0;
-	ret = CheckAndSetCoreNumber(str, &find);
-	if (find == true) {
-		 return ret;
-	}       
-	value = SearchSubString(str, QUEUE_AMOUNT);
-	if (value != NULL) {
-		ConfigTrim(value);
-		return TransformValueToInt(value, &g_SaClusterControlCfg.queueAmount);
-	}
-	value = SearchSubString(str, QUEUE_MAX_CAPACITY);
-	if (value != NULL) {
-		ConfigTrim(value);
-		return TransformValueToInt(value, &g_SaClusterControlCfg.queueMaxCapacity);
-	}
-	value = SearchSubString(str, MSGR_AMOUNT);
-	if (value != NULL) {
-		ConfigTrim(value);
-		return TransformValueToInt(value, &g_SaClusterControlCfg.msgrAmount);
-	}
-	value = SearchSubString(str, BIND_CORE);
-	if (value != NULL) {
-		ConfigTrim(value);
-		return TransformValueToInt(value, &g_SaClusterControlCfg.bindCore);
-	}
-	value = SearchSubString(str, BIND_QUEUE_CORE);
-	if (value != NULL) {
-		ConfigTrim(value);
-		return TransformValueToInt(value, &g_SaClusterControlCfg.bindQueueCore);
-	}
-	value = SearchSubString(str, WRITE_QOS);
-	if (value != NULL){
-		ConfigTrim(value);
-		return TransformValueToInt(value, &g_SaClusterControlCfg.writeOoS);
-	}
-	value = SearchSubString(str, GET_QUOTA_CYC);
-	if (value != NULL) {
-		ConfigTrim(value);
-		return TransformValueToInt(value, &g_SaClusterControlCfg.getQuotaCyc);
-	}
-	value = SearchSubString(str, GET_MESSENGER_THROTTLE);
-	if (value != NULL) {
-		ConfigTrim(value);
-		return TransformValueToInt(value,&g_SaClusterControlCfg.getMessengerThrottle);
-	}
-	value = SearchSubString(str, SA_OP_THROTTLE);
-	if (value != NULL) {
-		ConfigTrim(value);
-		return TransformValueToInt(value, &g_SaClusterControlCfg.saOpThrottle);
-	}
-	value = SearchSubString(str, WRITE_OP_THROTTLE);
-	if (value != NULL) {
-		ConfigTrim(value);
-		return TransformValueToInt(value, &g_SaClusterControlCfg.writeOpThrottle);
-	}
-	value = SearchSubString(str, READ_OP_THROTTLE);
-	if (value != NULL) {
-		ConfigTrim(value);
-		return TransformValueToInt(value, &g_SaClusterControlCfg.readOpThrottle);
-	}
-	value = SearchSubString(str, WRITE_BW_THROTTLE);
-	if (value != NULL) {
-		ConfigTrim(value);
-		return TransformValueToInt(value, &g_SaClusterControlCfg.writeBWThrottle);
-	}
-	value = SearchSubString(str, READ_BW_THROTTLE);
-	if (value != NULL) {
-		ConfigTrim(value);
-		return TransformValueToInt(value, &g_SaClusterControlCfg.readBWThrottle);
-	}
-	return RETURN_OK;
-}
-
-static int32_t ReadConfig(const char *configFile)
-{
-	FILE *pcfgFile = NULL;
-	uint8_t acBuf[CONFIG_BUFFSIZE];
-	int32_t ret = RETURN_OK;
-
-	pcfgFile = fopen(configFile, "r");
-	if (pcfgFile == NULL) {
-		fprintf(stderr, "config failed to open file: %s.", configFile);
+	if (ret != RETURN_OK) {
+		fprintf(stderr, "config get config para [unit:sa, key:core_number_%d] failed.\n", keyCpuNum);
 		return RETURN_ERROR;
 	}
+	return RETURN_OK;
+}
 
-	while (ret != RETURN_ERROR) {
-		memset(acBuf, 0, CONFIG_BUFFSIZE);
-		ret = ConfigReadByLine(pcfgFile, acBuf, CONFIG_BUFFSIZE);
-		if (ret != RETURN_OK) {
-			ret = RETURN_OK;
-			break;
-		}
 
-		ret = AnalyzeSubString(acBuf);
-		if (ret != RETURN_OK) {
-			fprintf(stderr,"config get config para failed(%s) str(%s).\n", configFile, (char *)acBuf);
-			break;
-		}
+
+static int32_t ReadConfig()
+{
+#define GET_CFG_ITEM_U64(dest, unit, key)				\
+	do {												\
+		int res = GetCfgItemUint64(dest, unit, key);	\
+		if (res != RETURN_OK) {							\
+			fprintf(stderr, "config get config para [unit:%s, key:%s] failed.\n", unit, key);	\
+			return RETURN_ERROR;						\
+		}												\
+	} while (0)
+	int32_t ret = RETURN_OK;
+	ret = GetCfgItemCstr(g_SaClusterControlCfg.listenIp, MAX_IPV4_ADDR_LEN, "communicate", "public_ipv4_addr");
+	if (ret != RETURN_OK) {
+		std::cerr << "config get config para [unit:communicate, key:public_ipv4_addr] failed.\n";
+		return RETURN_ERROR;
 	}
-	fclose(pcfgFile);
-
+	ret = GetCfgItemCstr(g_SaClusterControlCfg.listenPort, MAX_IPV4_ADDR_LEN, "communicate", "local_port");
+	if (ret != RETURN_OK) {
+		std::cerr << "config get config para [unit:communicate, key:public_ipv4_addr] failed.\n";
+		return RETURN_ERROR;
+	}
+	ret = SetCfgCorenum();
+	if (ret != RETURN_OK) {
+		return ret;
+	}
+	GET_CFG_ITEM_U64(&g_SaClusterControlCfg.queueAmount, "sa", "queue_amount");
+	GET_CFG_ITEM_U64(&g_SaClusterControlCfg.queueMaxCapacity, "sa", "queue_max_capacity");
+	GET_CFG_ITEM_U64(&g_SaClusterControlCfg.msgrAmount, "sa", "msgr_amount");
+	GET_CFG_ITEM_U64(&g_SaClusterControlCfg.bindCore, "sa", "bind_core");
+	GET_CFG_ITEM_U64(&g_SaClusterControlCfg.bindQueueCore, "sa", "bind_queue_core");
+	GET_CFG_ITEM_U64(&g_SaClusterControlCfg.writeOoS, "sa", "write_qos");
+	GET_CFG_ITEM_U64(&g_SaClusterControlCfg.getQuotaCyc, "sa", "get_quota_cyc");
+	GET_CFG_ITEM_U64(&g_SaClusterControlCfg.getMessengerThrottle, "sa", "enable_messenger_throttle");
+	GET_CFG_ITEM_U64(&g_SaClusterControlCfg.saOpThrottle, "sa", "sa_op_throttle");
+#undef GET_CFG_ITEM_U64
 	return ret;
 }
 
-int32_t OsaConfigRead::CacheClusterConfigInit(const char *filepath)
+int32_t OsaConfigRead::CacheClusterConfigInit()
 {
 	int ret;
-
 	memset(&g_SaClusterControlCfg, 0, sizeof(SA_ClusterControlCfg));
-	InitClusterCfg();
-
-	ret = ReadConfig(filepath);
+	ret = ReadConfig();
 	if (ret != RETURN_OK) {
 		fprintf(stderr, "read cluster config failed, ret %d.\n",ret);
 		return ret;
 	}
 	return RETURN_OK;
-}
-
-uint32_t OsaConfigRead::GetLocalIpv4Addr()
-{
-	return g_SaClusterControlCfg.ipv4Addr;
-}
-
-uint32_t OsaConfigRead::GetLocalPort()
-{
-	return g_SaClusterControlCfg.port;
-}
-
-uint32_t OsaConfigRead::IsUseOneSideRDMA()
-{
-	return g_SaClusterControlCfg.isUserOneSideRDMA;
-}
-
-uint32_t OsaConfigRead::GetGvaSlabObjNum()
-{
-	return g_SaClusterControlCfg.gvaSlabObjNum;
-}
-
-char *OsaConfigRead::GetLocalIpv4AddrStr()
-{
-	return g_SaClusterControlCfg.ipv4AddrStr;
-}
-
-char *OsaConfigRead::GetZkServerList()
-{
-	return g_SaClusterControlCfg.zkServerList;
 }
 
 char *OsaConfigRead::GetListenIp()
@@ -587,18 +160,6 @@ char *OsaConfigRead::GetListenIp()
 char *OsaConfigRead::GetListenPort()
 {
 	return g_SaClusterControlCfg.listenPort;
-}
-char *OsaConfigRead::GetSendIp()
-{
-	return g_SaClusterControlCfg.sendIp;
-}
-char *OsaConfigRead::GetSendPort()
-{
-	return g_SaClusterControlCfg.sendPort;
-}
-char *OsaConfigRead::GetTestMode()
-{
-	return g_SaClusterControlCfg.testMode;
 }
 char *OsaConfigRead::GetCoreNumber()
 {
@@ -623,10 +184,6 @@ uint32_t OsaConfigRead::GetBindQueueCore()
 	return g_SaClusterControlCfg.bindQueueCore;
 }
 
-uint32_t OsaConfigRead::GetPerf()
-{
-	return g_SaClusterControlCfg.perf;
-}
 uint32_t OsaConfigRead::GetQueueMaxCapacity()
 {
 	return g_SaClusterControlCfg.queueMaxCapacity;
@@ -646,52 +203,4 @@ uint32_t OsaConfigRead::GetMessengerThrottle()
 uint64_t OsaConfigRead::GetSaOpThrottle()
 {
 	return g_SaClusterControlCfg.saOpThrottle;
-}
-uint64_t OsaConfigRead::GetWriteOpThrottle()
-{
-	return g_SaClusterControlCfg.writeOpThrottle;
-}
-uint64_t OsaConfigRead::GetReadOpThrottle()
-{
-	return g_SaClusterControlCfg.readOpThrottle;
-}
-uint64_t OsaConfigRead::GetWriteBWThrottle()
-{
-	return g_SaClusterControlCfg.writeBWThrottle;
-}
-uint64_t OsaConfigRead::GetReadBWThrottle()
-{
-	return g_SaClusterControlCfg.readBWThrottle;
-}
-
-static int32_t CopyCores(uint32_t *destCores, uint32_t maxCoreNum, uint32_t *srcCores, uint32_t maxSrcCoreNum)
-{
-	if (destCores == NULL || srcCores == NULL) {
-		return 0;
-	}
-
-	uint32_t idx = 0;
-	for(idx = 0; idx < maxCoreNum && idx < maxSrcCoreNum; idx++) {
-		if (srcCores[idx] < MAX_CPU_NUM) {
-			destCores[idx] = srcCores[idx];
-		} else {
-			break;
-		}
-	}
-	return 0;
-}
-
-int32_t OsaConfigRead::GetIodCore(uint32_t *cores, uint32_t maxCoreNum)
-{
-	return CopyCores(cores, maxCoreNum, g_SaClusterControlCfg.iodCore, MAX_IOD_CORE);
-}
-
-int32_t OsaConfigRead::GetXnetCore(uint32_t *cores, uint32_t maxCoreNum)
-{
-	return CopyCores(cores, maxCoreNum, g_SaClusterControlCfg.xnetCore, MAX_XNET_CORE);
-}
-
-int32_t OsaConfigRead::GetDpshmCore(uint32_t *cores, uint32_t maxCoreNum)
-{
-	return CopyCores(cores, maxCoreNum, g_SaClusterControlCfg.dpshmCore, MAX_DPSHM_CORE);
 }

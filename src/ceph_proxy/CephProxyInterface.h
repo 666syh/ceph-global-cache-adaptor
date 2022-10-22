@@ -26,6 +26,10 @@
 extern "C" {
 #endif
 
+#ifndef PROXY_API_PUBLIC
+#define PROXY_API_PUBLIC __attribute__((visibility ("default")))
+#endif
+
 #define CEPHPROXY_CREATE_EXCLUSIVE 1
 #define CEPHPROXY_CREATE_IDEMPOTENT 0
 
@@ -213,6 +217,11 @@ typedef void *proxy_xattrs_iter_t;
 typedef void *proxy_omap_iter_t;
 typedef void *rados_client_t;
 
+struct PoolInfo{
+    uint32_t k;
+    uint32_t m;
+    uint32_t stripeUnit;
+};
 
 
 
@@ -221,8 +230,7 @@ typedef void *rados_client_t;
 
 
 
-
-int CephProxyInit(const char *conf, size_t wNum, const char *log,
+PROXY_API_PUBLIC int CephProxyInit(const char *conf, size_t wNum, const char *log,
 	       		ceph_proxy_t *proxy);
 
 
@@ -231,14 +239,14 @@ int CephProxyInit(const char *conf, size_t wNum, const char *log,
 
 
 
-void CephProxyShutdown(ceph_proxy_t proxy);
+PROXY_API_PUBLIC void CephProxyShutdown(ceph_proxy_t proxy);
 
 
 
 
 
 
-ceph_proxy_t GetCephProxyInstance(void);
+PROXY_API_PUBLIC ceph_proxy_t GetCephProxyInstance(void);
 
 
 
@@ -254,7 +262,7 @@ rados_ioctx_t CephProxyGetIoCtx(ceph_proxy_t proxy, const char *poolname);
 
 
 
-rados_ioctx_t CephProxyGetIoCtx2(ceph_proxy_t proxy, const int64_t poolId);
+PROXY_API_PUBLIC rados_ioctx_t CephProxyGetIoCtx2(ceph_proxy_t proxy, const int64_t poolId);
 
 
 
@@ -262,7 +270,7 @@ rados_ioctx_t CephProxyGetIoCtx2(ceph_proxy_t proxy, const int64_t poolId);
 
 
 
-rados_ioctx_t CephProxyGetIoCtxFromCeph(ceph_proxy_t proxy, const int64_t poolId);
+PROXY_API_PUBLIC rados_ioctx_t CephProxyGetIoCtxFromCeph(ceph_proxy_t proxy, const int64_t poolId);
 
 
 
@@ -270,7 +278,7 @@ rados_ioctx_t CephProxyGetIoCtxFromCeph(ceph_proxy_t proxy, const int64_t poolId
 
 
 
-void CephProxyReleaseIoCtx(rados_ioctx_t ioctx);
+PROXY_API_PUBLIC void CephProxyReleaseIoCtx(rados_ioctx_t ioctx);
 
 
 
@@ -314,7 +322,7 @@ int CephProxyGetMinAllocSize(ceph_proxy_t proxy, uint32_t *minAllocSize, CEPH_BD
 
 
 
-int CephProxyGetClusterStat(ceph_proxy_t proxy, CephClusterStat *result);
+PROXY_API_PUBLIC int CephProxyGetClusterStat(ceph_proxy_t proxy, CephClusterStat *result);
 
 
 
@@ -323,7 +331,15 @@ int CephProxyGetClusterStat(ceph_proxy_t proxy, CephClusterStat *result);
 
 
 
-int CephProxyGetPoolStat(ceph_proxy_t proxy, rados_ioctx_t ioctx, CephPoolStat *stats);
+PROXY_API_PUBLIC int CephProxyGetPoolStat(ceph_proxy_t proxy, rados_ioctx_t ioctx, CephPoolStat *stats);
+
+
+
+
+
+
+
+PROXY_API_PUBLIC int CephProxyGetPoolsStat(ceph_proxy_t proxy, CephPoolStat *stats, uint64_t *poolId, uint32_t poolNum);
 
 
 
@@ -332,7 +348,7 @@ int CephProxyGetPoolStat(ceph_proxy_t proxy, rados_ioctx_t ioctx, CephPoolStat *
 
 
 
-int CephProxyGetUsedSizeAndMaxAvail(ceph_proxy_t proxy, uint64_t &usedSize, uint64_t &maxAvail);
+PROXY_API_PUBLIC int CephProxyGetUsedSizeAndMaxAvail(ceph_proxy_t proxy, uint64_t &usedSize, uint64_t &maxAvail);
 
 
 
@@ -341,7 +357,7 @@ int CephProxyGetUsedSizeAndMaxAvail(ceph_proxy_t proxy, uint64_t &usedSize, uint
 
 
 
-int32_t CephProxyQueueOp(ceph_proxy_t proxy, ceph_proxy_op_t op, completion_t c);
+PROXY_API_PUBLIC int32_t CephProxyQueueOp(ceph_proxy_t proxy, ceph_proxy_op_t op, completion_t c);
 
 
 
@@ -350,14 +366,14 @@ int32_t CephProxyQueueOp(ceph_proxy_t proxy, ceph_proxy_op_t op, completion_t c)
 
 
 
-int CephProxyWriteOpInit2(ceph_proxy_op_t *op, const int64_t poolId, const char* oid);
+PROXY_API_PUBLIC int CephProxyWriteOpInit2(ceph_proxy_op_t *op, const int64_t poolId, const char* oid);
 
 
 
 
 
 
-void CephProxyWriteOpRelease(ceph_proxy_op_t op);
+PROXY_API_PUBLIC void CephProxyWriteOpRelease(ceph_proxy_op_t op);
 
 
 
@@ -450,7 +466,7 @@ void CephProxyWriteOpCreateObject(ceph_proxy_op_t op, int exclusive, const char 
 
 
 
-void CephProxyWriteOpWrite(ceph_proxy_op_t op, const char *buffer, size_t len, uint64_t off);
+PROXY_API_PUBLIC void CephProxyWriteOpWrite(ceph_proxy_op_t op, const char *buffer, size_t len, uint64_t off);
 
 
 
@@ -462,7 +478,7 @@ void CephProxyWriteOpWrite(ceph_proxy_op_t op, const char *buffer, size_t len, u
 
 
 
-void CephProxyWriteOpWriteSGL(ceph_proxy_op_t op, SGL_S *sgl, size_t len1, uint64_t off, AlignBuffer *alignBuffer, int isRelease);
+PROXY_API_PUBLIC void CephProxyWriteOpWriteSGL(ceph_proxy_op_t op, SGL_S *sgl, size_t len1, uint64_t off, AlignBuffer *alignBuffer, int isRelease);
 
 
 
@@ -526,7 +542,7 @@ void CephProxyWriteOpAppendSGL(ceph_proxy_op_t op, const SGL_S *sgl, size_t len,
 
 
 
-void CephProxyWriteOpRemove(ceph_proxy_op_t op);
+PROXY_API_PUBLIC void CephProxyWriteOpRemove(ceph_proxy_op_t op);
 
 
 
@@ -591,14 +607,14 @@ void CephProxyWriteOpSetAllocHint(ceph_proxy_op_t op, uint64_t expectedObjSize, 
 
 
 
-int CephProxyReadOpInit2(ceph_proxy_op_t *op, const int64_t poolId, const char* oid);
+PROXY_API_PUBLIC int CephProxyReadOpInit2(ceph_proxy_op_t *op, const int64_t poolId, const char* oid);
 
 
 
 
 
 
-void CephProxyReadOpRelease(ceph_proxy_op_t op);
+PROXY_API_PUBLIC void CephProxyReadOpRelease(ceph_proxy_op_t op);
 
 
 
@@ -674,7 +690,7 @@ void CephProxyReadOpOmapCmp(ceph_proxy_op_t op, const char *key, uint8_t compOpe
 
 
 
-void CephProxyReadOpStat(ceph_proxy_op_t op, uint64_t *psize, time_t *pmtime, int *prval);
+PROXY_API_PUBLIC void CephProxyReadOpStat(ceph_proxy_op_t op, uint64_t *psize, time_t *pmtime, int *prval);
 
 
 
@@ -686,7 +702,7 @@ void CephProxyReadOpStat(ceph_proxy_op_t op, uint64_t *psize, time_t *pmtime, in
 
 
 
-void CephProxyReadOpRead(ceph_proxy_op_t op, uint64_t offset, size_t len, char *buffer, size_t *bytesRead, int *prval);
+PROXY_API_PUBLIC void CephProxyReadOpRead(ceph_proxy_op_t op, uint64_t offset, size_t len, char *buffer, size_t *bytesRead, int *prval);
 
 
 
@@ -697,7 +713,7 @@ void CephProxyReadOpRead(ceph_proxy_op_t op, uint64_t offset, size_t len, char *
 
 
 
-void CephProxyReadOpReadSGL(ceph_proxy_op_t op, uint64_t offset, size_t len, SGL_S *sgl, int *prval, int isRelease);
+PROXY_API_PUBLIC void CephProxyReadOpReadSGL(ceph_proxy_op_t op, uint64_t offset, size_t len, SGL_S *sgl, int *prval, int isRelease);
 
 
 
@@ -727,14 +743,14 @@ void CephProxyReadOpCheckSum(ceph_proxy_op_t op, proxy_checksum_type_t type, con
 
 
 
-completion_t CephProxyCreateCompletion(CallBack_t fn, void *arg);
+PROXY_API_PUBLIC completion_t CephProxyCreateCompletion(CallBack_t fn, void *arg);
 
 
 
 
 
 
-void CephProxyCompletionDestroy(completion_t c);
+PROXY_API_PUBLIC void CephProxyCompletionDestroy(completion_t c);
 
 
 
@@ -748,7 +764,9 @@ int CephProxyRegisterPoolDelNotifyFn(NotifyPoolEventFn fn);
 
 
 
-int CephProxyRegisterPoolNewNotifyFn(NotifyPoolEventFn fn);
+PROXY_API_PUBLIC int CephProxyRegisterPoolNewNotifyFn(NotifyPoolEventFn fn);
+
+PROXY_API_PUBLIC int CephProxyGetPoolInfo(ceph_proxy_t proxy, uint32_t poolId, struct PoolInfo *info);
 
 #ifdef __cplusplus
 }

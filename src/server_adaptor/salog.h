@@ -44,10 +44,17 @@ void OsaWriteLogLimit(const int log_level, std::string file_name, int f_line, co
 		const char *format, ...);
 void OsaWriteLogLimit2(const int log_level, std::string file_name, int f_line, const std::string func_name,
 		const char *format, ...);
+void OsaWriteDataLog(std::string file_name, int f_line, const std::string func_name,
+		const char *format, ...);
 
 #define Salog(level, subModule, format, ...)      \
    do {						  \
 	  OsaWriteLog(level, __FILE__, __LINE__, __func__, format, ## __VA_ARGS__);\
+      } while (0) 
+
+#define SaDatalog(format, ...)      \
+   do {						  \
+	  OsaWriteDataLog(__FILE__, __LINE__, __func__, format, ## __VA_ARGS__);\
       } while (0) 
 
 #define SalogLimit(level, subModule, format, ...)      \

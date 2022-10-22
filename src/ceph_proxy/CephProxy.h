@@ -76,9 +76,11 @@ public:
 	int64_t GetPoolIdByCtx(rados_ioctx_t ioctx);
 	int GetClusterStat(CephClusterStat *stat);
 	int GetPoolStat(rados_ioctx_t ctx, CephPoolStat *stat);
+	int GetPoolsStat(CephPoolStat *stat, uint64_t *poolId, uint32_t poolNum);
 	int GetMinAllocSize(uint32_t *minAllocSize, CEPH_BDEV_TYPE_E type);
 	int GetPoolUsedSizeAndMaxAvail(uint64_t &usedSize, uint64_t &maxAvail);
 	int RegisterPoolNewNotifyFn(NotifyPoolEventFn fn);
+	int GetPoolInfo(uint32_t poolId, struct PoolInfo *info);
 };
 
 #endif
