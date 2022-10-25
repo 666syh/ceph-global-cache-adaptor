@@ -1,27 +1,14 @@
-From ac0bb1cce8d581f69795a9b7d7b2794c7329becb Mon Sep 17 00:00:00 2001
-From: wangzengliang <root@taishan200-2280-2s48p-256g--a60.compass-ci.net>
-Date: Thu, 4 Nov 2021 11:08:32 +0800
-Subject: [PATCH] modify spec patch
-
----
- ceph.spec                                 | 14 ++++++++++++--
- do_cmake.sh                               |  2 +-
- install-deps.sh                           |  2 +-
- src/pybind/mgr/dashboard/requirements.txt |  2 +-
- 4 files changed, 15 insertions(+), 5 deletions(-)
-
 diff --git a/ceph.spec b/ceph.spec
-index e32d7754..07e702c7 100644
+index e32d7754..e79adcae 100644
 --- a/ceph.spec
 +++ b/ceph.spec
-@@ -1,3 +1,6 @@
+@@ -1,3 +1,5 @@
 +%define _binaries_in_noarch_packages_terminate_build 0
-+%global _third_part_dir  /opt/gcache_adaptor_compile
 +
  # vim: set noexpandtab ts=8 sw=8 :
  #
  # spec file for package ceph
-@@ -93,7 +96,7 @@
+@@ -93,7 +95,7 @@
  
  # unify libexec for all targets
  %global _libexecdir %{_exec_prefix}/lib
@@ -30,17 +17,16 @@ index e32d7754..07e702c7 100644
  # disable dwz which compresses the debuginfo
  %global _find_debuginfo_dwz_opts %{nil}
  
-@@ -1154,7 +1157,8 @@ export CEPH_MFLAGS_JOBS="-j$CEPH_SMP_NCPUS"
+@@ -1154,7 +1156,7 @@ export CEPH_MFLAGS_JOBS="-j$CEPH_SMP_NCPUS"
  
  env | sort
  
 -mkdir build
-+cp -r %{_third_part_dir}/third_part ..
 +sh do_cmake.sh -DWITH_GLOBAL_CACHE=ON -DCMAKE_BUILD_TYPE=Release
  cd build
  %if 0%{?rhel} == 7
  CMAKE=cmake3
-@@ -1162,6 +1166,7 @@ CMAKE=cmake3
+@@ -1162,6 +1164,7 @@ CMAKE=cmake3
  CMAKE=cmake
  %endif
  ${CMAKE} .. \
@@ -48,27 +34,16 @@ index e32d7754..07e702c7 100644
      -DCMAKE_INSTALL_PREFIX=%{_prefix} \
      -DCMAKE_INSTALL_LIBDIR=%{_libdir} \
      -DCMAKE_INSTALL_LIBEXECDIR=%{_libexecdir} \
-@@ -1296,6 +1301,8 @@ install -m 644 -D monitoring/prometheus/alerts/ceph_default_alerts.yml %{buildro
- %py_byte_compile %{__python3} %{buildroot}%{python3_sitelib}
- %endif
- 
-+mkdir -p %{buildroot}%{_libdir}/gcache
-+install -m 0600 -D %{_third_part_dir}/third_part/lib/*  %{buildroot}%{_libdir}/gcache
- %clean
- rm -rf %{buildroot}
- 
-@@ -1318,6 +1325,9 @@ rm -rf %{buildroot}
+@@ -1318,6 +1321,7 @@ rm -rf %{buildroot}
  %dir %{_libdir}/rados-classes
  %{_libdir}/rados-classes/*
  %dir %{_libdir}/ceph
 +%{_libdir}/ceph/libceph_client_adaptor_plugin.so
-+%dir %{_libdir}/gcache
-+%{_libdir}/gcache/lib*.so*
  %dir %{_libdir}/ceph/erasure-code
  %{_libdir}/ceph/erasure-code/libec_*.so*
  %dir %{_libdir}/ceph/compressor
 diff --git a/do_cmake.sh b/do_cmake.sh
-index 3dc25c8d..631c3e92 100755
+index 3dc25c8d..631c3e92 100644
 --- a/do_cmake.sh
 +++ b/do_cmake.sh
 @@ -44,7 +44,7 @@ if type cmake3 > /dev/null 2>&1 ; then
@@ -81,7 +56,7 @@ index 3dc25c8d..631c3e92 100755
  # minimal config to find plugins
  cat <<EOF > ceph.conf
 diff --git a/install-deps.sh b/install-deps.sh
-index 96d8370d..d6c4d492 100755
+index 96d8370d..d6c4d492 100644
 --- a/install-deps.sh
 +++ b/install-deps.sh
 @@ -318,7 +318,7 @@ else
@@ -106,6 +81,3 @@ index caa1db80..b5857d06 100644
  pytest==3.3.2
  pytest-cov==2.5.1
  pytest-faulthandler==1.0.1
--- 
-2.23.0
-
