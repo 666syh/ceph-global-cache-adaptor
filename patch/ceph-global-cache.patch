@@ -1831,7 +1831,7 @@ index df5271e8..2e8d7f0c 100644
      uint64_t readahead_max_bytes;
      uint64_t readahead_disable_after_bytes;
 diff --git a/src/librbd/Operations.cc b/src/librbd/Operations.cc
-index ffb8f5c8..27734dfb 100644
+index ffb8f5c8..f090917c 100644
 --- a/src/librbd/Operations.cc
 +++ b/src/librbd/Operations.cc
 @@ -41,6 +41,11 @@
@@ -1846,7 +1846,46 @@ index ffb8f5c8..27734dfb 100644
  #define dout_subsys ceph_subsys_rbd
  #undef dout_prefix
  #define dout_prefix *_dout << "librbd::Operations: "
-@@ -811,6 +816,35 @@ int Operations<I>::snap_rollback(const cls::rbd::SnapshotNamespace& snap_namespa
+@@ -733,6 +738,38 @@ void Operations<I>::snap_create(const cls::rbd::SnapshotNamespace &snap_namespac
+   }
+   m_image_ctx.snap_lock.put_read();
+ 
++#ifdef WITH_GLOBAL_CACHE
++  if (m_image_ctx.md_ctx.check_acc()) {
++    PluginRegistry *reg = cct->get_plugin_registry();
++    auto plugin = static_cast<ClientAdaptorPlugin *>(reg->get_with_load("global_cache", "client_adaptor_plugin"));
++    int mgr_ret = -ELIBACC;
++    if (plugin && plugin->mgr_ref) {
++      int64_t md_pool_id;
++      int64_t data_pool_id;
++      md_pool_id = m_image_ctx.md_ctx.get_id();
++      if (!m_image_ctx.data_ctx.is_valid()) {
++        data_pool_id = md_pool_id;
++      } else {
++        data_pool_id = m_image_ctx.data_ctx.get_id();
++      }
++      ldout(cct, 10) << " check if rollback " << md_pool_id << "/" << data_pool_id << "/" << m_image_ctx.id << dendl;
++      mgr_ret = plugin->mgr_ref->gc_is_rollbacking(md_pool_id, data_pool_id, m_image_ctx.id);
++      if (mgr_ret < 0) {
++        on_finish->complete(mgr_ret);
++        return;
++      } else if (mgr_ret == 1) {
++        lderr(cct) << " Client Adaptor: " << md_pool_id << "(" << data_pool_id << ")/" << m_image_ctx.id
++                    << " GC backend is rollbacking, snap create not allowed, please wait." << dendl;
++        on_finish->complete(-EBUSY);
++        return;
++      }
++    } else {
++      on_finish->complete(mgr_ret);
++      return;
++    }
++  }
++#endif
++
+   C_InvokeAsyncRequest<I> *req = new C_InvokeAsyncRequest<I>(
+     m_image_ctx, "snap_create", exclusive_lock::OPERATION_REQUEST_TYPE_GENERAL,
+     true,
+@@ -811,6 +848,35 @@ int Operations<I>::snap_rollback(const cls::rbd::SnapshotNamespace& snap_namespa
        }
      }
  
